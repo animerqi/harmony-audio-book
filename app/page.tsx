@@ -15,6 +15,8 @@ type ScoreEvent = { at: number; duration: number; notes: number[] };
 
 type ScoreResult = {
   id: string;
+  key?: string;
+  imageSeq?: string;
   bpm: number;
   eventCount: number;
   events: ScoreEvent[];
@@ -25,6 +27,7 @@ type ScoreResult = {
 
 type BookBlock = {
   id: string;
+  volume: '基础篇' | '高级篇';
   html: string;
   text: string;
   kind: 'chapter' | 'section' | 'image' | 'text';
@@ -36,6 +39,7 @@ type SectionPage = {
   id: string;
   title: string;
   chapterTitle: string;
+  volume: '基础篇' | '高级篇';
   blocks: BookBlock[];
 };
 
@@ -49,21 +53,25 @@ const READER_FONT_STACKS: Record<ReaderFont, string> = {
 };
 
 function blockAnchor(block: BookBlock) {
-  if (block.kind === 'chapter') {
-    return block.text.startsWith('第一章') ? 'chapter-one' : 'chapter-two';
-  }
   if (block.kind === 'section') {
     const sectionNumber = block.text.match(/^(\d+[-－]\d+)/)?.[1]?.replace('－', '-');
     if (sectionNumber) return `section-${sectionNumber}`;
   }
-  return block.id;
+  return `${block.kind}-${block.id}`;
 }
 
-const ROMAN_TO_C: Record<string, string> = {
-  I: 'C', i: 'Cm', II: 'D', ii: 'Dm', III: 'E', iii: 'Em',
-  IV: 'F', iv: 'Fm', V: 'G', v: 'Gm', VI: 'A', vi: 'Am',
-  VII: 'B', vii: 'Bdim', 'vii°': 'Bdim',
-};
+function chapterMarker(title: string) {
+  const chineseNumber = title.match(/^第([一二三四五六七八九十]+)章/)?.[1];
+  const numbers: Record<string, string> = {
+    一: '01', 二: '02', 三: '03', 四: '04', 五: '05', 六: '06', 七: '07', 八: '08', 九: '09', 十: '10',
+    十一: '11', 十二: '12', 十三: '13',
+  };
+  if (chineseNumber) return numbers[chineseNumber] ?? chineseNumber;
+  if (title.includes('前言')) return '序';
+  if (title.includes('附录')) return '附';
+  if (title.includes('自测')) return '测';
+  return '•';
+}
 
 const NOTE_INDEX: Record<string, number> = {
   C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
@@ -84,11 +92,13 @@ function chordToMidi(symbol: string): number[] {
   const quality = match[2];
   const root = 48 + (NOTE_INDEX[rootName] ?? 0);
   let intervals = [0, 4, 7];
-  if (/dim|°/.test(quality)) intervals = [0, 3, 6];
+  if (/dim7/.test(quality)) intervals = [0, 3, 6, 9];
+  else if (/m7b5|ø/.test(quality)) intervals = [0, 3, 6, 10];
+  else if (/dim|°/.test(quality)) intervals = [0, 3, 6];
   else if (/^m(?!aj)/.test(quality)) intervals = [0, 3, 7];
   else if (/\+|aug/.test(quality)) intervals = [0, 4, 8];
-  if (/maj7/.test(quality)) intervals.push(11);
-  else if (/7/.test(quality)) intervals.push(10);
+  if (intervals.length === 3 && /maj7/.test(quality)) intervals.push(11);
+  else if (intervals.length === 3 && /7/.test(quality)) intervals.push(10);
   const notes = intervals.map((interval) => root + interval);
   if (slashBass && NOTE_INDEX[slashBass] !== undefined) {
     let bass = 36 + NOTE_INDEX[slashBass];
@@ -99,14 +109,24 @@ function chordToMidi(symbol: string): number[] {
 }
 
 function romanTokenToChord(token: string) {
-  const clean = token.replace(/[()]/g, '');
+  const clean = normalizeSymbols(token).replace(/[()]/g, '');
+  const accidental = clean.match(/^[#b]/)?.[0] ?? '';
+  const roman = clean.replace(/^[#b]/, '').match(/^(?:vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)/)?.[0] ?? 'I';
+  const degreeOffsets: Record<string, number> = { I: 0, II: 2, III: 4, IV: 5, V: 7, VI: 9, VII: 11 };
+  let pitchClass = degreeOffsets[roman.toUpperCase()] ?? 0;
+  if (accidental === '#') pitchClass += 1;
+  if (accidental === 'b') pitchClass -= 1;
+  const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const root = (accidental === 'b' ? flatNames : sharpNames)[(pitchClass + 12) % 12];
   const seventh = /7|Δ/.test(clean);
-  const roman = clean.replace(/7|Δ/g, '');
-  const base = ROMAN_TO_C[roman] ?? 'C';
-  if (!seventh) return base;
-  if (base === 'G') return 'G7';
-  if (base.endsWith('m')) return `${base}7`;
-  return `${base}maj7`;
+  if (/ø/.test(clean)) return `${root}m7b5`;
+  if (/°/.test(clean)) return `${root}${seventh ? 'dim7' : 'dim'}`;
+  if (/\+/.test(clean)) return `${root}aug${seventh ? '7' : ''}`;
+  const minor = roman === roman.toLowerCase();
+  if (!seventh) return `${root}${minor ? 'm' : ''}`;
+  if (/Δ/.test(clean)) return `${root}maj7`;
+  return `${root}${minor ? 'm7' : '7'}`;
 }
 
 function digitsToProgression(digits: string) {
@@ -131,13 +151,15 @@ function detectTextProgressions(text: string, blockId: string): AudioExample[] {
     found.push({ id: `${blockId}-${found.length}`, label: label ?? `${key}｜正文进行`, source: '正文', display, chords });
   };
 
-  const chordToken = '[A-G](?:#|b)?(?:m|dim|°|\\+)?(?:7|maj7|Δ)?(?:\\/[A-G](?:#|b)?)?';
+  const chordToken = '[A-G](?:#|b)?(?:maj7|m7b5|dim7|m7|dim|m|°7|°|\\+7|\\+|7|Δ)?(?:\\/[A-G](?:#|b)?)?';
   const chordPattern = new RegExp(`(${chordToken}(?:—${chordToken}){1,12})`, 'g');
-  for (const match of normalized.matchAll(chordPattern)) {
-    const sequence = match[1].split('—');
-    add(sequence, sequence);
+  if (/和弦|进行|终止|套路|连接|解决|序进/.test(normalized)) {
+    for (const match of normalized.matchAll(chordPattern)) {
+      const sequence = match[1].split('—');
+      add(sequence, sequence);
+    }
   }
-  const romanToken = '(?:vii°|VII°|vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)(?:\\(7\\)|7|Δ)?';
+  const romanToken = '[#b]?(?:vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)(?:°|ø|\\+)?(?:\\(?(?:7|Δ)\\)?)?';
   const romanPattern = new RegExp(`(${romanToken}(?:—${romanToken}){1,12})`, 'g');
   for (const match of normalized.matchAll(romanPattern)) {
     const sequence = match[1].split('—');
@@ -151,54 +173,113 @@ function detectTextProgressions(text: string, blockId: string): AudioExample[] {
     add(['I', 'V', 'vi', 'iii', 'IV', 'I', 'ii', 'V'], ['C', 'G', 'Am', 'Em', 'F', 'C', 'Dm', 'G'], '卡农进行｜ii 版本');
     add(['I', 'V', 'vi', 'iii', 'IV', 'I', 'IV', 'V'], ['C', 'G', 'Am', 'Em', 'F', 'C', 'F', 'G'], '卡农进行｜IV 版本');
   }
-  return found.slice(0, 6);
+  return found.slice(0, 12);
 }
 
-function parseBook(source: string, scoreResults: ScoreResult[]): BookBlock[] {
+function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础篇' | '高级篇'): BookBlock[] {
   const documentNode = new DOMParser().parseFromString(source, 'text/html');
   const allNodes = [...documentNode.body.children];
-  const firstChapter = allNodes.findIndex((node) => node.textContent?.trim().startsWith('第一章'));
-  const thirdChapter = allNodes.findIndex((node) => node.textContent?.trim().startsWith('第三章'));
-  const selected = allNodes.slice(firstChapter, thirdChapter);
   const blocks: BookBlock[] = [];
+  const volumeKey = volume === '基础篇' ? 'basic' : 'advanced';
   const scoresById = new Map(scoreResults.map((score) => [score.id, score]));
+  const scoresByImage = new Map(scoreResults.filter((score) => score.imageSeq).map((score) => [score.imageSeq as string, score]));
   let pendingScoreNumber: string | null = null;
-  let inSecondChapter = false;
-  selected.forEach((node, index) => {
+  let pendingScorePatience = 0;
+  let pendingScoreHasImage = false;
+  let generatedIndex = 0;
+
+  const addBlock = (node: Element, kindOverride?: BookBlock['kind']) => {
     const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     const className = node.getAttribute('class') ?? '';
-    if (text.startsWith('第二章')) inSecondChapter = true;
-    const scoreMatch = text.match(/^谱例(2\.[123])/);
-    if (scoreMatch) pendingScoreNumber = scoreMatch[1];
+    const scoreReference = text.match(/谱例\s*([0-9]+(?:\.[0-9]+)+)/);
+    const isScoreCaption = /^谱例\s*[0-9]/.test(text);
+    if (scoreReference) {
+      pendingScoreNumber = scoreReference[1];
+      pendingScorePatience = 3;
+      pendingScoreHasImage = false;
+    }
     node.querySelectorAll('img').forEach((image) => {
       image.setAttribute('loading', 'lazy');
+      image.setAttribute('decoding', 'async');
       image.removeAttribute('width');
       image.removeAttribute('height');
     });
-    const kind: BookBlock['kind'] = className.includes('headline-level-1') ? 'chapter'
-      : className.includes('headline-level-2') ? 'section' : node.querySelector('img') ? 'image' : 'text';
-    const id = `book-block-${index}`;
-    const audio = scoreMatch || !inSecondChapter ? [] : detectTextProgressions(text, id);
+    const kind: BookBlock['kind'] = kindOverride ?? (className.includes('headline-level-1') ? 'chapter'
+      : className.includes('headline-level-2') ? 'section' : node.querySelector('img') ? 'image' : 'text');
+    const id = `${volumeKey}-block-${generatedIndex++}`;
+    const audio = isScoreCaption ? [] : detectTextProgressions(text, id);
+    const imageSeq = node.querySelector('img')?.getAttribute('data-seq') ?? undefined;
     const score = kind === 'image' && pendingScoreNumber
-      ? scoresById.get(pendingScoreNumber)
+      ? (imageSeq ? scoresByImage.get(imageSeq) : undefined) ?? scoresById.get(pendingScoreNumber)
       : undefined;
-    if (kind === 'image' && pendingScoreNumber) pendingScoreNumber = null;
-    blocks.push({ id, html: node.outerHTML, text, kind, audio, score });
-  });
+    blocks.push({ id, volume, html: node.outerHTML, text, kind, audio, score });
+    if (pendingScoreNumber && kind === 'image') pendingScoreHasImage = true;
+    else if (pendingScoreNumber && !scoreReference && text) {
+      pendingScorePatience -= 1;
+      if (pendingScoreHasImage || pendingScorePatience <= 0) pendingScoreNumber = null;
+    }
+  };
+
+  const addSyntheticChapter = (title: string) => {
+    const element = documentNode.createElement('p');
+    element.className = 'headline headline-level-1';
+    element.textContent = title;
+    addBlock(element, 'chapter');
+  };
+
+  if (volume === '基础篇') {
+    allNodes.forEach((node) => {
+      if (node.tagName === 'H1') return;
+      addBlock(node);
+    });
+  } else {
+    const advancedChapters: Record<string, string> = {
+      '11': '第十一章 转调与调性布局',
+      '12': '第十二章 调式与民族调性',
+      '13': '第十三章 音集与现代调性',
+    };
+    let activeChapterKey = '';
+    allNodes.forEach((node) => {
+      if (node.tagName !== 'H1') {
+        addBlock(node);
+        return;
+      }
+      const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      if (text === '下一篇') return;
+      const chapterNumber = text.match(/^(\d+)-\d+/)?.[1];
+      const chapterKey = chapterNumber ?? `appendix-${text}`;
+      if (chapterKey !== activeChapterKey) {
+        addSyntheticChapter(chapterNumber ? advancedChapters[chapterNumber] ?? `第${chapterNumber}章` : '附录');
+        activeChapterKey = chapterKey;
+      }
+      addBlock(node, 'section');
+    });
+  }
   return blocks;
 }
 
 function paginateBook(blocks: BookBlock[]): SectionPage[] {
   const pages: SectionPage[] = [];
   let chapterTitle = '';
+  let chapterId = '';
+  let chapterVolume: SectionPage['volume'] = '基础篇';
   let chapterLead: BookBlock[] = [];
   let currentPage: SectionPage | null = null;
+
+  const finishChapterLead = () => {
+    if (chapterLead.length === 0 || !chapterTitle) return;
+    pages.push({ id: chapterId, title: chapterTitle, chapterTitle, volume: chapterVolume, blocks: chapterLead });
+    chapterLead = [];
+  };
 
   blocks.forEach((block) => {
     if (block.kind === 'chapter') {
       if (currentPage) pages.push(currentPage);
+      else finishChapterLead();
       currentPage = null;
       chapterTitle = block.text;
+      chapterId = blockAnchor(block);
+      chapterVolume = block.volume;
       chapterLead = [];
       return;
     }
@@ -208,6 +289,7 @@ function paginateBook(blocks: BookBlock[]): SectionPage[] {
         id: blockAnchor(block),
         title: block.text,
         chapterTitle,
+        volume: block.volume,
         blocks: [...chapterLead, block],
       };
       chapterLead = [];
@@ -217,6 +299,7 @@ function paginateBook(blocks: BookBlock[]): SectionPage[] {
     else chapterLead.push(block);
   });
   if (currentPage) pages.push(currentPage);
+  else finishChapterLead();
   return pages;
 }
 
@@ -285,7 +368,8 @@ function ScoreAudioCard({ score, playback, onPlay, onStop }: {
   onStop: () => void;
 }) {
   const [tempo, setTempo] = useState(score.bpm);
-  const active = playback?.id === `score-${score.id}`;
+  const playbackKey = score.key ?? score.imageSeq ?? score.id;
+  const active = playback?.id === `score-${playbackKey}`;
   const progress = active && score.eventCount > 1
     ? (playback.step / (score.eventCount - 1)) * 100
     : 0;
@@ -361,15 +445,22 @@ export default function Home() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/book-source.html').then((response) => {
-        if (!response.ok) throw new Error('无法读取书稿');
+      fetch('/books/basic.html').then((response) => {
+        if (!response.ok) throw new Error('无法读取基础篇');
+        return response.text();
+      }),
+      fetch('/books/advanced.html').then((response) => {
+        if (!response.ok) throw new Error('无法读取高级篇');
         return response.text();
       }),
       fetch('/score-audio/manifest.json').then((response) => {
         if (!response.ok) throw new Error('无法读取谱例音频');
         return response.json() as Promise<{ scores: ScoreResult[] }>;
       }),
-    ]).then(([source, manifest]) => setBlocks(parseBook(source, manifest.scores)))
+    ]).then(([basicSource, advancedSource, manifest]) => setBlocks([
+      ...parseBook(basicSource, manifest.scores, '基础篇'),
+      ...parseBook(advancedSource, manifest.scores, '高级篇'),
+    ]))
       .catch(() => setLoadError('书稿或谱例音频载入失败，请刷新页面重试。'));
   }, []);
 
@@ -432,6 +523,7 @@ export default function Home() {
     let cancelled = false;
     const secondsPerBeat = 60 / selectedTempo;
     const startAt = context.currentTime + 0.06;
+    const playbackKey = score.key ?? score.imageSeq ?? score.id;
 
     score.events.forEach((event, index) => {
       scheduleNotes(
@@ -443,14 +535,14 @@ export default function Home() {
         nodes,
       );
       timers.push(window.setTimeout(() => {
-        if (!cancelled) setPlayback({ id: `score-${score.id}`, step: index });
+        if (!cancelled) setPlayback({ id: `score-${playbackKey}`, step: index });
       }, (event.at * secondsPerBeat + 0.06) * 1000));
     });
 
     const finalEvent = score.events.at(-1);
     const totalBeats = finalEvent ? finalEvent.at + finalEvent.duration : 0;
     timers.push(window.setTimeout(() => !cancelled && setPlayback(null), (totalBeats * secondsPerBeat + 0.12) * 1000));
-    setPlayback({ id: `score-${score.id}`, step: 0 });
+    setPlayback({ id: `score-${playbackKey}`, step: 0 });
     stopRef.current = () => {
       cancelled = true;
       timers.forEach(window.clearTimeout);
@@ -485,14 +577,19 @@ export default function Home() {
     window.requestAnimationFrame(() => document.getElementById('section-reading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
-  const chapterNavigation: Array<{ id: string; title: string; sections: Array<{ id: string; title: string }> }> = [];
-  blocks.forEach((block) => {
-    if (block.kind === 'chapter') {
-      chapterNavigation.push({ id: blockAnchor(block), title: block.text, sections: [] });
-    } else if (block.kind === 'section' && chapterNavigation.length > 0) {
-      chapterNavigation.at(-1)?.sections.push({ id: blockAnchor(block), title: block.text });
+  const chapterNavigation: Array<{ id: string; title: string; volume: SectionPage['volume']; sections: Array<{ id: string; title: string }> }> = [];
+  sectionPages.forEach((page) => {
+    const previousChapter = chapterNavigation.at(-1);
+    if (!previousChapter || previousChapter.title !== page.chapterTitle || previousChapter.volume !== page.volume) {
+      chapterNavigation.push({ id: page.id, title: page.chapterTitle, volume: page.volume, sections: [] });
     }
+    chapterNavigation.at(-1)?.sections.push({ id: page.id, title: page.title });
   });
+  const volumeNavigation = (['基础篇', '高级篇'] as const).map((volume) => ({
+    volume,
+    chapters: chapterNavigation.filter((chapter) => chapter.volume === volume),
+    firstPage: sectionPages.find((page) => page.volume === volume),
+  }));
 
   return (
     <div className="site-shell">
@@ -506,9 +603,9 @@ export default function Home() {
       <header className="site-header">
         <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>叶小胖 著</small></span></a>
         <nav aria-label="章节导航">
-          {chapterNavigation.map((chapter) => <a href={`#${chapter.sections[0]?.id ?? chapter.id}`} key={chapter.id} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title.match(/^第.+?章/)?.[0] ?? chapter.title}</a>)}
+          {volumeNavigation.map(({ volume, firstPage }) => <a href={`#${firstPage?.id ?? 'top'}`} key={volume} onClick={(event) => { event.preventDefault(); if (firstPage) goToSection(firstPage.id); }}>{volume}</a>)}
         </nav>
-        <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">第一、二章</span></div>
+        <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">基础篇 · 高级篇</span></div>
       </header>
       {settingsOpen && (
         <section className="reader-settings" id="reader-settings" aria-label="阅读设置">
@@ -525,14 +622,14 @@ export default function Home() {
       <div className="page-layout" id="top">
         <aside className="chapter-rail">
           <p className="eyebrow">阅读目录</p>
-          {chapterNavigation.map((chapter, chapterIndex) => (
-            <div className="toc-group" key={chapter.id}>
-              <a className="toc-chapter" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}><span>{String(chapterIndex + 1).padStart(2, '0')}</span><strong>{chapter.title.replace(/^第.+?章\s*/, '')}</strong></a>
-              <div className="toc-sections">
-                {chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}
+          {volumeNavigation.map(({ volume, chapters }) => <section className="toc-volume" key={volume}><h2>{volume}</h2>{chapters.map((chapter) => (
+              <div className="toc-group" key={`${volume}-${chapter.id}`}>
+                <a className="toc-chapter" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}><span>{chapterMarker(chapter.title)}</span><strong>{chapter.title.replace(/^第.+?章\s*/, '')}</strong></a>
+                <div className="toc-sections">
+                  {chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}</section>)}
         </aside>
         <main className="reader">
           <section className="reader-intro">
@@ -545,10 +642,10 @@ export default function Home() {
               <span className="wind-note note-one">♪</span>
               <span className="wind-note note-two">♫</span>
             </div>
-            <p className="eyebrow">叶小胖 著 · 第一、二章听觉阅读</p>
+            <p className="eyebrow">叶小胖 著 · 基础篇与高级篇完整听觉阅读</p>
             <h1>图解和声</h1>
             <p className="hero-tagline">翻开书页，让和弦随风响起</p>
-            <p className="hero-description">本 Demo 保留书稿原文与插图，并为书中的谱例与明确写出的和声进行补充声音。</p>
+            <p className="hero-description">完整收录基础篇与高级篇的书稿原文和插图，并为书中的谱例与明确写出的和声进行补充声音。</p>
             <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
           </section>
           <section className="listening-preface" aria-labelledby="listening-preface-title">
@@ -566,16 +663,16 @@ export default function Home() {
           </section>
           <details className="mobile-toc">
             <summary>展开完整目录</summary>
-            {chapterNavigation.map((chapter) => (
-              <div key={chapter.id}><a className="mobile-chapter-link" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title}</a>{chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}</div>
-            ))}
+            {volumeNavigation.map(({ volume, chapters }) => <section className="mobile-volume" key={volume}><h2>{volume}</h2>{chapters.map((chapter) => (
+              <div key={`${volume}-${chapter.id}`}><a className="mobile-chapter-link" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title}</a>{chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}</div>
+            ))}</section>)}
           </details>
           {loadError && <p className="load-state error">{loadError}</p>}
-          {!loadError && blocks.length === 0 && <p className="load-state">正在整理第一、二章内容…</p>}
+          {!loadError && blocks.length === 0 && <p className="load-state">正在整理基础篇与高级篇内容…</p>}
           {activePage && (
             <section className="section-reading" id="section-reading" aria-labelledby="current-section-title">
               <header className="section-page-header">
-                <div><p>{activePage.chapterTitle}</p><span>第 {activePageIndex + 1} / {sectionPages.length} 节</span></div>
+                <div><p>{activePage.volume} · {activePage.chapterTitle}</p><span>第 {activePageIndex + 1} / {sectionPages.length} 节</span></div>
                 <h2 id="current-section-title">{activePage.title}</h2>
                 <div className="section-progress" aria-label={`全书进度 ${Math.round(((activePageIndex + 1) / sectionPages.length) * 100)}%`}><span style={{ width: `${((activePageIndex + 1) / sectionPages.length) * 100}%` }} /></div>
               </header>
@@ -590,13 +687,13 @@ export default function Home() {
               </article>
               <nav className="section-pagination" aria-label="小节翻页">
                 <button type="button" disabled={!previousPage} onClick={() => previousPage && goToSection(previousPage.id)}><small>← 上一节</small><strong>{previousPage?.title ?? '已经是第一节'}</strong></button>
-                <button type="button" disabled={!nextPage} onClick={() => nextPage && goToSection(nextPage.id)}><small>下一节 →</small><strong>{nextPage?.title ?? '已读完本 Demo'}</strong></button>
+                <button type="button" disabled={!nextPage} onClick={() => nextPage && goToSection(nextPage.id)}><small>下一节 →</small><strong>{nextPage?.title ?? '已读完全书'}</strong></button>
               </nav>
             </section>
           )}
         </main>
       </div>
-      <footer><span>《图解和声》· 叶小胖 著 · 第一、二章听觉阅读 Demo</span><a href="#top">回到页首 ↑</a></footer>
+      <footer><span>《图解和声》· 叶小胖 著 · 基础篇与高级篇听觉阅读</span><a href="#top">回到页首 ↑</a></footer>
     </div>
   );
 }

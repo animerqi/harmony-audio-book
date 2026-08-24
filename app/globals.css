@@ -471,3 +471,12 @@ footer a { color: #ffe0a0; }
 @media (prefers-reduced-motion: reduce) {
   .section-progress span, .section-pagination button { transition: none !important; }
 }
+
+/* Full two-volume table of contents. */
+.toc-volume + .toc-volume { margin-top: 28px; padding-top: 22px; border-top: 2px solid rgba(85,108,77,.14); }
+.toc-volume > h2 { margin: 0 0 8px; color: #3c6c4b; font-family: "KaiTi", "STKaiti", serif; font-size: 18px; letter-spacing: .08em; }
+.toc-volume .toc-group:last-child { padding-bottom: 2px; }
+.mobile-volume { padding: 2px 16px 14px; }
+.mobile-volume + .mobile-volume { padding-top: 13px; border-top: 1px dashed rgba(70,103,73,.22); }
+.mobile-volume > h2 { margin: 5px 0 9px; color: #3c6c4b; font-family: "KaiTi", "STKaiti", serif; font-size: 17px; }
+.mobile-toc .mobile-volume > div { display: flex; flex-direction: column; padding: 0; }
