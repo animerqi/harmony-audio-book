@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type AudioExample = {
   id: string;
@@ -30,6 +30,13 @@ type BookBlock = {
   kind: 'chapter' | 'section' | 'image' | 'text';
   audio: AudioExample[];
   score?: ScoreResult;
+};
+
+type SectionPage = {
+  id: string;
+  title: string;
+  chapterTitle: string;
+  blocks: BookBlock[];
 };
 
 type PlaybackState = { id: string; step: number } | null;
@@ -181,6 +188,38 @@ function parseBook(source: string, scoreResults: ScoreResult[]): BookBlock[] {
   return blocks;
 }
 
+function paginateBook(blocks: BookBlock[]): SectionPage[] {
+  const pages: SectionPage[] = [];
+  let chapterTitle = '';
+  let chapterLead: BookBlock[] = [];
+  let currentPage: SectionPage | null = null;
+
+  blocks.forEach((block) => {
+    if (block.kind === 'chapter') {
+      if (currentPage) pages.push(currentPage);
+      currentPage = null;
+      chapterTitle = block.text;
+      chapterLead = [];
+      return;
+    }
+    if (block.kind === 'section') {
+      if (currentPage) pages.push(currentPage);
+      currentPage = {
+        id: blockAnchor(block),
+        title: block.text,
+        chapterTitle,
+        blocks: [...chapterLead, block],
+      };
+      chapterLead = [];
+      return;
+    }
+    if (currentPage) currentPage.blocks.push(block);
+    else chapterLead.push(block);
+  });
+  if (currentPage) pages.push(currentPage);
+  return pages;
+}
+
 function scheduleNotes(context: AudioContext, destination: AudioNode, midiNotes: number[], start: number, duration: number, nodes: OscillatorNode[]) {
   midiNotes.forEach((midi, noteIndex) => {
     const frequency = 440 * 2 ** ((midi - 69) / 12);
@@ -283,6 +322,7 @@ export default function Home() {
   const [readerFont, setReaderFont] = useState<ReaderFont>('serif');
   const [readerFontSize, setReaderFontSize] = useState(16);
   const [readerLineHeight, setReaderLineHeight] = useState(2);
+  const [currentSectionId, setCurrentSectionId] = useState('');
   const [settingsReady, setSettingsReady] = useState(false);
   const stopRef = useRef<() => void>(() => undefined);
 
@@ -422,6 +462,29 @@ export default function Home() {
   useEffect(() => () => stopRef.current(), []);
   const textAudioCount = blocks.reduce((total, block) => total + block.audio.length, 0);
   const scoreAudioCount = blocks.filter((block) => block.score).length;
+  const sectionPages = useMemo(() => paginateBook(blocks), [blocks]);
+  const activePageIndex = Math.max(0, sectionPages.findIndex((page) => page.id === currentSectionId));
+  const activePage = sectionPages[activePageIndex];
+  const previousPage = activePageIndex > 0 ? sectionPages[activePageIndex - 1] : null;
+  const nextPage = activePageIndex < sectionPages.length - 1 ? sectionPages[activePageIndex + 1] : null;
+
+  useEffect(() => {
+    if (sectionPages.length === 0) return;
+    const requestedId = decodeURIComponent(window.location.hash.slice(1));
+    setCurrentSectionId((current) => {
+      if (sectionPages.some((page) => page.id === current)) return current;
+      return sectionPages.find((page) => page.id === requestedId)?.id ?? sectionPages[0].id;
+    });
+  }, [sectionPages]);
+
+  const goToSection = (sectionId: string) => {
+    if (!sectionPages.some((page) => page.id === sectionId)) return;
+    stop();
+    setCurrentSectionId(sectionId);
+    window.history.replaceState(null, '', `#${sectionId}`);
+    window.requestAnimationFrame(() => document.getElementById('section-reading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+
   const chapterNavigation: Array<{ id: string; title: string; sections: Array<{ id: string; title: string }> }> = [];
   blocks.forEach((block) => {
     if (block.kind === 'chapter') {
@@ -442,7 +505,9 @@ export default function Home() {
       <div className="reading-progress" style={{ width: `${readingProgress}%` }} />
       <header className="site-header">
         <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>叶小胖 著</small></span></a>
-        <nav aria-label="章节导航"><a href="#chapter-one">第一章</a><a href="#chapter-two">第二章</a></nav>
+        <nav aria-label="章节导航">
+          {chapterNavigation.map((chapter) => <a href={`#${chapter.sections[0]?.id ?? chapter.id}`} key={chapter.id} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title.match(/^第.+?章/)?.[0] ?? chapter.title}</a>)}
+        </nav>
         <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">第一、二章</span></div>
       </header>
       {settingsOpen && (
@@ -462,9 +527,9 @@ export default function Home() {
           <p className="eyebrow">阅读目录</p>
           {chapterNavigation.map((chapter, chapterIndex) => (
             <div className="toc-group" key={chapter.id}>
-              <a className="toc-chapter" href={`#${chapter.id}`}><span>{String(chapterIndex + 1).padStart(2, '0')}</span><strong>{chapter.title.replace(/^第.+?章\s*/, '')}</strong></a>
+              <a className="toc-chapter" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}><span>{String(chapterIndex + 1).padStart(2, '0')}</span><strong>{chapter.title.replace(/^第.+?章\s*/, '')}</strong></a>
               <div className="toc-sections">
-                {chapter.sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}
+                {chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}
               </div>
             </div>
           ))}
@@ -502,20 +567,33 @@ export default function Home() {
           <details className="mobile-toc">
             <summary>展开完整目录</summary>
             {chapterNavigation.map((chapter) => (
-              <div key={chapter.id}><a className="mobile-chapter-link" href={`#${chapter.id}`}>{chapter.title}</a>{chapter.sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}</div>
+              <div key={chapter.id}><a className="mobile-chapter-link" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title}</a>{chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}</div>
             ))}
           </details>
           {loadError && <p className="load-state error">{loadError}</p>}
           {!loadError && blocks.length === 0 && <p className="load-state">正在整理第一、二章内容…</p>}
-          <article className="book-content">
-            {blocks.map((block) => (
-              <div className={`book-block book-${block.kind}`} id={blockAnchor(block)} key={block.id}>
-                <div dangerouslySetInnerHTML={{ __html: block.html }} />
-                {block.score && <ScoreAudioCard score={block.score} playback={playback} onPlay={playScore} onStop={stop} />}
-                {block.audio.map((example) => <AudioCard key={example.id} example={example} playback={playback} onPlay={play} onStop={stop} />)}
-              </div>
-            ))}
-          </article>
+          {activePage && (
+            <section className="section-reading" id="section-reading" aria-labelledby="current-section-title">
+              <header className="section-page-header">
+                <div><p>{activePage.chapterTitle}</p><span>第 {activePageIndex + 1} / {sectionPages.length} 节</span></div>
+                <h2 id="current-section-title">{activePage.title}</h2>
+                <div className="section-progress" aria-label={`全书进度 ${Math.round(((activePageIndex + 1) / sectionPages.length) * 100)}%`}><span style={{ width: `${((activePageIndex + 1) / sectionPages.length) * 100}%` }} /></div>
+              </header>
+              <article className="book-content" id={activePage.id}>
+                {activePage.blocks.filter((block) => block.kind !== 'section').map((block) => (
+                  <div className={`book-block book-${block.kind}`} key={block.id}>
+                    <div dangerouslySetInnerHTML={{ __html: block.html }} />
+                    {block.score && <ScoreAudioCard score={block.score} playback={playback} onPlay={playScore} onStop={stop} />}
+                    {block.audio.map((example) => <AudioCard key={example.id} example={example} playback={playback} onPlay={play} onStop={stop} />)}
+                  </div>
+                ))}
+              </article>
+              <nav className="section-pagination" aria-label="小节翻页">
+                <button type="button" disabled={!previousPage} onClick={() => previousPage && goToSection(previousPage.id)}><small>← 上一节</small><strong>{previousPage?.title ?? '已经是第一节'}</strong></button>
+                <button type="button" disabled={!nextPage} onClick={() => nextPage && goToSection(nextPage.id)}><small>下一节 →</small><strong>{nextPage?.title ?? '已读完本 Demo'}</strong></button>
+              </nav>
+            </section>
+          )}
         </main>
       </div>
       <footer><span>《图解和声》· 叶小胖 著 · 第一、二章听觉阅读 Demo</span><a href="#top">回到页首 ↑</a></footer>
