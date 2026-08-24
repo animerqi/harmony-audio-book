@@ -433,6 +433,12 @@ export default function Home() {
 
   return (
     <div className="site-shell">
+      <div className="ambient-scene" aria-hidden="true">
+        <span className="floating-cloud cloud-one" />
+        <span className="floating-cloud cloud-two" />
+        <span className="drifting-leaf leaf-one">⌁</span>
+        <span className="drifting-leaf leaf-two">⌁</span>
+      </div>
       <div className="reading-progress" style={{ width: `${readingProgress}%` }} />
       <header className="site-header">
         <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>听觉阅读 Demo</small></span></a>
@@ -466,9 +472,18 @@ export default function Home() {
         </aside>
         <main className="reader">
           <section className="reader-intro">
-            <p className="eyebrow">Harmony you can hear</p>
-            <h1>读到和弦，也立刻听见和弦</h1>
-            <p>本 Demo 保留书稿原文与插图。橙色卡片是 HOMR 从谱例图片识别得到的 MIDI，蓝色卡片只来自正文中明确写出的和声进行。</p>
+            <div className="storybook-landscape" aria-hidden="true">
+              <span className="hero-sun" />
+              <span className="hero-cloud hero-cloud-one" />
+              <span className="hero-cloud hero-cloud-two" />
+              <span className="hero-hill hill-back" />
+              <span className="hero-hill hill-front" />
+              <span className="wind-note note-one">♪</span>
+              <span className="wind-note note-two">♫</span>
+            </div>
+            <p className="eyebrow">Harmony storybook · 和声听觉绘本</p>
+            <h1>翻开书页，<br />让和弦随风响起</h1>
+            <p>本 Demo 保留书稿原文与插图。橙色卡片是 HOMR 从谱例图片识别得到的 MIDI，天空蓝卡片只来自正文中明确写出的和声进行。</p>
             <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
           </section>
           <details className="mobile-toc">
