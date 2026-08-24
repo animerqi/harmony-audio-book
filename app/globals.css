@@ -531,3 +531,128 @@ footer a { color: #ffe0a0; }
 .mobile-volume + .mobile-volume { padding-top: 13px; border-top: 1px dashed rgba(70,103,73,.22); }
 .mobile-volume > h2 { margin: 5px 0 9px; color: #3c6c4b; font-family: "KaiTi", "STKaiti", serif; font-size: 17px; }
 .mobile-toc .mobile-volume > div { display: flex; flex-direction: column; padding: 0; }
+
+/* A quiet book cover and an always-reachable mobile contents drawer. */
+.reader-intro.reader-cover {
+  display: flex;
+  min-height: 270px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  margin-bottom: 42px;
+  padding: 54px 28px;
+  border: 1px solid rgba(75, 103, 78, .16);
+  border-radius: 24px 19px 27px 21px;
+  background: rgba(255, 253, 244, .9);
+  box-shadow: 5px 7px 0 rgba(83, 111, 78, .055), 0 20px 52px rgba(74, 86, 61, .07);
+  text-align: center;
+}
+.reader-intro.reader-cover::before {
+  background: repeating-linear-gradient(2deg, rgba(104, 77, 45, .018) 0 1px, transparent 1px 7px);
+}
+.reader-intro.reader-cover h1 {
+  max-width: none;
+  color: #315b42;
+  font-size: clamp(46px, 7vw, 72px);
+  letter-spacing: .08em;
+}
+.reader-intro.reader-cover .cover-author {
+  position: relative;
+  z-index: 1;
+  max-width: none;
+  margin: 24px 0 0;
+  color: #756b5e;
+  font-family: "KaiTi", "STKaiti", var(--reader-font-family);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: .16em;
+}
+.mobile-toc-trigger,
+.mobile-toc-backdrop,
+.mobile-toc-drawer { display: none; }
+
+@media (max-width: 900px) {
+  .mobile-toc { display: none; }
+  .mobile-toc-trigger {
+    position: fixed;
+    z-index: 76;
+    right: 17px;
+    bottom: calc(17px + env(safe-area-inset-bottom));
+    display: inline-flex;
+    min-width: 76px;
+    height: 48px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 15px 0 11px;
+    border: 1px solid rgba(45, 91, 64, .2);
+    border-radius: 17px 13px 19px 14px;
+    background: #315d43;
+    color: #fffdf4;
+    box-shadow: 4px 6px 0 rgba(64, 91, 67, .13), 0 12px 28px rgba(45, 77, 57, .22);
+    font: 700 13px/1 sans-serif;
+  }
+  .mobile-toc-trigger span {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 9px 7px 10px 8px;
+    background: rgba(255, 255, 255, .14);
+    font-family: "KaiTi", "STKaiti", serif;
+    font-size: 15px;
+  }
+  .mobile-toc-backdrop {
+    position: fixed;
+    z-index: 80;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: rgba(35, 48, 40, .42);
+    backdrop-filter: blur(2px);
+  }
+  .mobile-toc-drawer {
+    position: fixed;
+    z-index: 81;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    width: min(88vw, 380px);
+    flex-direction: column;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    border-left: 1px solid rgba(66, 94, 70, .18);
+    background: #fffdf5;
+    box-shadow: -16px 0 50px rgba(35, 55, 42, .18);
+  }
+  .mobile-toc-drawer > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 23px 20px 18px;
+    border-bottom: 1px dashed rgba(70, 103, 73, .24);
+  }
+  .mobile-toc-drawer > header div { min-width: 0; }
+  .mobile-toc-drawer > header small { display: block; margin-bottom: 7px; color: #ae6d43; font: 700 10px/1 sans-serif; letter-spacing: .1em; }
+  .mobile-toc-drawer > header strong { display: block; overflow: hidden; color: #315d43; font-family: "KaiTi", "STKaiti", serif; font-size: 19px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-toc-drawer > header button { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(67, 96, 71, .16); border-radius: 12px 9px 13px 10px; background: rgba(231, 241, 222, .7); color: #315d43; font-size: 22px; }
+  .mobile-toc-drawer > nav { overflow-y: auto; padding: 20px 17px 36px; overscroll-behavior: contain; }
+  .drawer-volume + .drawer-volume { margin-top: 28px; padding-top: 23px; border-top: 1px dashed rgba(70, 103, 73, .23); }
+  .drawer-volume > h2 { margin: 0 0 13px; color: #ad6c42; font: 700 13px/1.3 "KaiTi", "STKaiti", serif; letter-spacing: .08em; }
+  .drawer-chapter + .drawer-chapter { margin-top: 17px; }
+  .drawer-chapter { display: flex; flex-direction: column; }
+  .mobile-toc-drawer a { padding: 8px 10px 8px 14px; border-left: 1px dashed rgba(70, 103, 73, .22); color: #65736a; font: 12px/1.45 sans-serif; }
+  .mobile-toc-drawer .drawer-chapter-link { padding: 9px 10px; border-left: 4px solid #d88945; color: #315d43; font-weight: 800; }
+  .mobile-toc-drawer a.active { border-left-color: #78a38d; border-radius: 0 10px 10px 0; background: rgba(220, 237, 210, .72); color: #27593e; font-weight: 800; }
+}
+
+@media (max-width: 560px) {
+  .reader-intro.reader-cover { min-height: 230px; margin-bottom: 30px; padding: 42px 20px; border-radius: 21px 17px 24px 19px; }
+  .reader-intro.reader-cover h1 { font-size: 48px; }
+  .reader-intro.reader-cover .cover-author { margin-top: 18px; font-size: 16px; }
+  .mobile-toc-trigger { right: 13px; bottom: calc(13px + env(safe-area-inset-bottom)); }
+}

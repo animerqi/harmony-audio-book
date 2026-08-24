@@ -411,6 +411,7 @@ export default function Home() {
   const [playback, setPlayback] = useState<PlaybackState>(null);
   const [readingProgress, setReadingProgress] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileTocOpen, setMobileTocOpen] = useState(false);
   const [readerFont, setReaderFont] = useState<ReaderFont>('serif');
   const [readerFontSize, setReaderFontSize] = useState(16);
   const [readerLineHeight, setReaderLineHeight] = useState(2);
@@ -445,11 +446,26 @@ export default function Home() {
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSettingsOpen(false);
+      if (event.key === 'Escape') {
+        setSettingsOpen(false);
+        setMobileTocOpen(false);
+      }
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, []);
+
+  useEffect(() => {
+    if (!mobileTocOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.requestAnimationFrame(() => {
+      document.querySelector('.mobile-toc-drawer a.active')?.scrollIntoView({ block: 'center' });
+    });
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileTocOpen]);
 
   useEffect(() => {
     Promise.all([
@@ -560,8 +576,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => () => stopRef.current(), []);
-  const textAudioCount = blocks.reduce((total, block) => total + block.audio.length, 0);
-  const scoreAudioCount = blocks.filter((block) => block.score).length;
   const sectionPages = useMemo(() => paginateBook(blocks), [blocks]);
   const activePageIndex = Math.max(0, sectionPages.findIndex((page) => page.id === currentSectionId));
   const activePage = sectionPages[activePageIndex];
@@ -580,6 +594,7 @@ export default function Home() {
   const goToSection = (sectionId: string) => {
     if (!sectionPages.some((page) => page.id === sectionId)) return;
     stop();
+    setMobileTocOpen(false);
     setCurrentSectionId(sectionId);
     window.history.replaceState(null, '', `#${sectionId}`);
     window.requestAnimationFrame(() => document.getElementById('section-reading')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -615,6 +630,23 @@ export default function Home() {
         </nav>
         <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">基础篇 · 高级篇</span></div>
       </header>
+      <button className="mobile-toc-trigger" type="button" aria-expanded={mobileTocOpen} aria-controls="mobile-toc-drawer" onClick={() => { setSettingsOpen(false); setMobileTocOpen(true); }}><span aria-hidden="true">目</span>目录</button>
+      {mobileTocOpen && (
+        <>
+          <button className="mobile-toc-backdrop" type="button" aria-label="关闭目录" onClick={() => setMobileTocOpen(false)} />
+          <aside className="mobile-toc-drawer" id="mobile-toc-drawer" role="dialog" aria-modal="true" aria-label="阅读目录">
+            <header><div><small>阅读目录</small><strong>{activePage?.title ?? '图解和声'}</strong></div><button type="button" aria-label="关闭目录" onClick={() => setMobileTocOpen(false)}>×</button></header>
+            <nav aria-label="完整章节目录">
+              {volumeNavigation.map(({ volume, chapters }) => <section className="drawer-volume" key={volume}><h2>{volume}</h2>{chapters.map((chapter) => (
+                <div className="drawer-chapter" key={`${volume}-${chapter.id}`}>
+                  <a className="drawer-chapter-link" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title}</a>
+                  {chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}
+                </div>
+              ))}</section>)}
+            </nav>
+          </aside>
+        </>
+      )}
       {settingsOpen && (
         <section className="reader-settings" id="reader-settings" aria-label="阅读设置">
           <div className="settings-heading"><div><p className="eyebrow">阅读设置</p><h2>让正文更适合你的屏幕</h2></div><button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭阅读设置">×</button></div>
@@ -640,41 +672,10 @@ export default function Home() {
             ))}</section>)}
         </aside>
         <main className="reader">
-          <section className="reader-intro">
-            <div className="storybook-landscape" aria-hidden="true">
-              <span className="hero-sun" />
-              <span className="hero-cloud hero-cloud-one" />
-              <span className="hero-cloud hero-cloud-two" />
-              <span className="hero-hill hill-back" />
-              <span className="hero-hill hill-front" />
-              <span className="wind-note note-one">♪</span>
-              <span className="wind-note note-two">♫</span>
-            </div>
-            <p className="eyebrow">叶小胖 著 · 基础篇与高级篇完整听觉阅读</p>
+          <section className="reader-intro reader-cover">
             <h1>图解和声</h1>
-            <p className="hero-tagline">翻开书页，让和弦随风响起</p>
-            <p className="hero-description">完整收录基础篇与高级篇的书稿原文和插图，并为书中的谱例与明确写出的和声进行补充声音。</p>
-            <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
+            <p className="cover-author">叶小胖 著</p>
           </section>
-          <section className="listening-preface" aria-labelledby="listening-preface-title">
-            <div className="preface-copy">
-              <p className="eyebrow">关于本页的声音</p>
-              <h2 id="listening-preface-title">正文不猜，谱图走 OMR</h2>
-              <p>和声进行只读取正文中的明确写法；谱例图片由 HOMR 转为 MusicXML 与 MIDI，并保留下载结果供校对。</p>
-            </div>
-            <div className="preface-count" aria-label={`${textAudioCount + scoreAudioCount} 条可试听内容`}>
-              <strong>{textAudioCount + scoreAudioCount || '—'}</strong>
-              <span>条可试听内容</span>
-              <small>{scoreAudioCount} 个谱例 · {textAudioCount} 条正文进行</small>
-            </div>
-            {playback && <button className="preface-stop" type="button" onClick={stop}><span>■</span> 停止当前音频</button>}
-          </section>
-          <details className="mobile-toc">
-            <summary>展开完整目录</summary>
-            {volumeNavigation.map(({ volume, chapters }) => <section className="mobile-volume" key={volume}><h2>{volume}</h2>{chapters.map((chapter) => (
-              <div key={`${volume}-${chapter.id}`}><a className="mobile-chapter-link" href={`#${chapter.sections[0]?.id ?? chapter.id}`} onClick={(event) => { event.preventDefault(); if (chapter.sections[0]) goToSection(chapter.sections[0].id); }}>{chapter.title}</a>{chapter.sections.map((section) => <a className={activePage?.id === section.id ? 'active' : ''} aria-current={activePage?.id === section.id ? 'page' : undefined} href={`#${section.id}`} key={section.id} onClick={(event) => { event.preventDefault(); goToSection(section.id); }}>{section.title}</a>)}</div>
-            ))}</section>)}
-          </details>
           {loadError && <p className="load-state error">{loadError}</p>}
           {!loadError && blocks.length === 0 && <p className="load-state">正在整理基础篇与高级篇内容…</p>}
           {activePage && (
