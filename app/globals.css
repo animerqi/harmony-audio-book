@@ -405,3 +405,33 @@ footer a { color: #ffe0a0; }
   .floating-cloud, .drifting-leaf, .hero-cloud, .hero-sun, .sound-orbit { animation: none !important; }
   .play-button, .toc-chapter, .toc-sections a, .audio-card, .score-audio-card { transition: none !important; }
 }
+
+/* Book-first introduction: keep the side column for navigation only. */
+.page-layout { grid-template-columns: 230px minmax(0, 900px); }
+.reader-intro { margin-bottom: 26px; }
+.reader-intro > .hero-tagline { margin-top: 17px; color: #3d684c; font-family: "KaiTi", "STKaiti", serif; font-size: 22px; font-weight: 700; line-height: 1.45; }
+.reader-intro > .hero-description { max-width: 510px; margin-top: 11px; font-size: 14px; line-height: 1.75; }
+.listening-preface { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 28px; align-items: center; margin-bottom: 58px; padding: 25px 28px; border: 1px dashed rgba(74,105,76,.28); border-radius: 18px 25px 19px 23px; background: rgba(255,252,239,.6); color: var(--ink); }
+.preface-copy .eyebrow { margin-bottom: 8px; }
+.preface-copy h2 { margin: 0; color: #396148; font-family: "KaiTi", "STKaiti", serif; font-size: 22px; line-height: 1.35; }
+.preface-copy > p:last-child { max-width: 580px; margin: 9px 0 0; color: var(--muted); font: 12px/1.75 sans-serif; }
+.preface-count { display: flex; flex-direction: column; padding: 4px 0 4px 24px; border-left: 1px dashed rgba(78,108,80,.3); }
+.preface-count strong { color: #4f8060; font: 700 36px/1 "KaiTi", "STKaiti", serif; }
+.preface-count span { margin-top: 5px; color: #485f52; font: 700 12px/1.35 sans-serif; }
+.preface-count small { margin-top: 5px; color: #7a897f; font: 10px/1.4 sans-serif; }
+.preface-stop { grid-column: 1 / -1; justify-self: start; padding: 9px 14px; border: 1px solid rgba(165,90,45,.16); border-radius: 12px 10px 13px 11px; background: #d98849; color: white; box-shadow: 2px 3px 0 rgba(143,80,38,.1); font: 700 11px/1 sans-serif; }
+.preface-stop span { margin-right: 5px; color: #ffe0bd; }
+
+@media (max-width: 1160px) {
+  .page-layout { grid-template-columns: 205px minmax(0, 820px); }
+}
+@media (max-width: 900px) {
+  .listening-preface { margin-bottom: 38px; }
+  .listening-preface + .mobile-toc { margin-top: 0; }
+}
+@media (max-width: 620px) {
+  .reader-intro > .hero-tagline { font-size: 20px; }
+  .listening-preface { grid-template-columns: 1fr; gap: 18px; padding: 22px 20px; }
+  .preface-count { padding: 15px 0 0; border-top: 1px dashed rgba(78,108,80,.3); border-left: 0; }
+  .preface-count strong { font-size: 31px; }
+}

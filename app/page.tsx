@@ -441,7 +441,7 @@ export default function Home() {
       </div>
       <div className="reading-progress" style={{ width: `${readingProgress}%` }} />
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>听觉阅读 Demo</small></span></a>
+        <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>叶小胖 著</small></span></a>
         <nav aria-label="章节导航"><a href="#chapter-one">第一章</a><a href="#chapter-two">第二章</a></nav>
         <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">第一、二章</span></div>
       </header>
@@ -468,7 +468,6 @@ export default function Home() {
               </div>
             </div>
           ))}
-          <div className="rail-note"><b>{textAudioCount + scoreAudioCount || '—'}</b><span>条可试听内容</span><small>{scoreAudioCount} 个谱例 · {textAudioCount} 条正文进行</small></div>
         </aside>
         <main className="reader">
           <section className="reader-intro">
@@ -481,10 +480,24 @@ export default function Home() {
               <span className="wind-note note-one">♪</span>
               <span className="wind-note note-two">♫</span>
             </div>
-            <p className="eyebrow">Harmony storybook · 和声听觉绘本</p>
-            <h1>翻开书页，<br />让和弦随风响起</h1>
-            <p>本 Demo 保留书稿原文与插图。橙色卡片是 HOMR 从谱例图片识别得到的 MIDI，天空蓝卡片只来自正文中明确写出的和声进行。</p>
+            <p className="eyebrow">叶小胖 著 · 第一、二章听觉阅读</p>
+            <h1>图解和声</h1>
+            <p className="hero-tagline">翻开书页，让和弦随风响起</p>
+            <p className="hero-description">本 Demo 保留书稿原文与插图，并为书中的谱例与明确写出的和声进行补充声音。</p>
             <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
+          </section>
+          <section className="listening-preface" aria-labelledby="listening-preface-title">
+            <div className="preface-copy">
+              <p className="eyebrow">关于本页的声音</p>
+              <h2 id="listening-preface-title">正文不猜，谱图走 OMR</h2>
+              <p>和声进行只读取正文中的明确写法；谱例图片由 HOMR 转为 MusicXML 与 MIDI，并保留下载结果供校对。</p>
+            </div>
+            <div className="preface-count" aria-label={`${textAudioCount + scoreAudioCount} 条可试听内容`}>
+              <strong>{textAudioCount + scoreAudioCount || '—'}</strong>
+              <span>条可试听内容</span>
+              <small>{scoreAudioCount} 个谱例 · {textAudioCount} 条正文进行</small>
+            </div>
+            {playback && <button className="preface-stop" type="button" onClick={stop}><span>■</span> 停止当前音频</button>}
           </section>
           <details className="mobile-toc">
             <summary>展开完整目录</summary>
@@ -504,12 +517,8 @@ export default function Home() {
             ))}
           </article>
         </main>
-        <aside className="listening-rail">
-          <div className="listening-card"><span className="sound-orbit" aria-hidden="true">♪</span><p className="eyebrow">试听规则</p><h2>正文不猜，谱图走 OMR</h2><p>和声进行只读取正文中的明确写法；谱例图片由 HOMR 转为 MusicXML 与 MIDI，并保留下载结果供校对。</p></div>
-          {playback && <button className="floating-stop" type="button" onClick={stop}><span>■</span> 停止当前音频</button>}
-        </aside>
       </div>
-      <footer><span>图解和声 · 第一、二章听觉阅读 Demo</span><a href="#top">回到页首 ↑</a></footer>
+      <footer><span>《图解和声》· 叶小胖 著 · 第一、二章听觉阅读 Demo</span><a href="#top">回到页首 ↑</a></footer>
     </div>
   );
 }
