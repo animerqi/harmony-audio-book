@@ -34,6 +34,17 @@ type BookBlock = {
 
 type PlaybackState = { id: string; step: number } | null;
 
+function blockAnchor(block: BookBlock) {
+  if (block.kind === 'chapter') {
+    return block.text.startsWith('第一章') ? 'chapter-one' : 'chapter-two';
+  }
+  if (block.kind === 'section') {
+    const sectionNumber = block.text.match(/^(\d+[-－]\d+)/)?.[1]?.replace('－', '-');
+    if (sectionNumber) return `section-${sectionNumber}`;
+  }
+  return block.id;
+}
+
 const ROMAN_TO_C: Record<string, string> = {
   I: 'C', i: 'Cm', II: 'D', ii: 'Dm', III: 'E', iii: 'Em',
   IV: 'F', iv: 'Fm', V: 'G', v: 'Gm', VI: 'A', vi: 'Am',
@@ -366,6 +377,14 @@ export default function Home() {
   useEffect(() => () => stopRef.current(), []);
   const textAudioCount = blocks.reduce((total, block) => total + block.audio.length, 0);
   const scoreAudioCount = blocks.filter((block) => block.score).length;
+  const chapterNavigation: Array<{ id: string; title: string; sections: Array<{ id: string; title: string }> }> = [];
+  blocks.forEach((block) => {
+    if (block.kind === 'chapter') {
+      chapterNavigation.push({ id: blockAnchor(block), title: block.text, sections: [] });
+    } else if (block.kind === 'section' && chapterNavigation.length > 0) {
+      chapterNavigation.at(-1)?.sections.push({ id: blockAnchor(block), title: block.text });
+    }
+  });
 
   return (
     <div className="site-shell">
@@ -378,8 +397,14 @@ export default function Home() {
       <div className="page-layout" id="top">
         <aside className="chapter-rail">
           <p className="eyebrow">阅读目录</p>
-          <a href="#chapter-one"><span>01</span>循环与网格图</a>
-          <a href="#chapter-two"><span>02</span>大调和声</a>
+          {chapterNavigation.map((chapter, chapterIndex) => (
+            <div className="toc-group" key={chapter.id}>
+              <a className="toc-chapter" href={`#${chapter.id}`}><span>{String(chapterIndex + 1).padStart(2, '0')}</span><strong>{chapter.title.replace(/^第.+?章\s*/, '')}</strong></a>
+              <div className="toc-sections">
+                {chapter.sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}
+              </div>
+            </div>
+          ))}
           <div className="rail-note"><b>{textAudioCount + scoreAudioCount || '—'}</b><span>条可试听内容</span><small>{scoreAudioCount} 个谱例 · {textAudioCount} 条正文进行</small></div>
         </aside>
         <main className="reader">
@@ -389,11 +414,17 @@ export default function Home() {
             <p>本 Demo 保留书稿原文与插图。橙色卡片是 HOMR 从谱例图片识别得到的 MIDI，蓝色卡片只来自正文中明确写出的和声进行。</p>
             <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
           </section>
+          <details className="mobile-toc">
+            <summary>展开完整目录</summary>
+            {chapterNavigation.map((chapter) => (
+              <div key={chapter.id}><a className="mobile-chapter-link" href={`#${chapter.id}`}>{chapter.title}</a>{chapter.sections.map((section) => <a href={`#${section.id}`} key={section.id}>{section.title}</a>)}</div>
+            ))}
+          </details>
           {loadError && <p className="load-state error">{loadError}</p>}
           {!loadError && blocks.length === 0 && <p className="load-state">正在整理第一、二章内容…</p>}
           <article className="book-content">
             {blocks.map((block) => (
-              <div className={`book-block book-${block.kind}`} id={block.kind === 'chapter' ? block.text.startsWith('第一章') ? 'chapter-one' : 'chapter-two' : block.id} key={block.id}>
+              <div className={`book-block book-${block.kind}`} id={blockAnchor(block)} key={block.id}>
                 <div dangerouslySetInnerHTML={{ __html: block.html }} />
                 {block.score && <ScoreAudioCard score={block.score} playback={playback} onPlay={playScore} onStop={stop} />}
                 {block.audio.map((example) => <AudioCard key={example.id} example={example} playback={playback} onPlay={play} onStop={stop} />)}
