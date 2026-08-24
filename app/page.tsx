@@ -11,39 +11,28 @@ type AudioExample = {
   note?: string;
 };
 
+type ScoreEvent = { at: number; duration: number; notes: number[] };
+
+type ScoreResult = {
+  id: string;
+  bpm: number;
+  eventCount: number;
+  events: ScoreEvent[];
+  midiUrl: string;
+  musicXmlUrl: string;
+  engine: string;
+};
+
 type BookBlock = {
   id: string;
   html: string;
   text: string;
   kind: 'chapter' | 'section' | 'image' | 'text';
   audio: AudioExample[];
+  score?: ScoreResult;
 };
 
 type PlaybackState = { id: string; step: number } | null;
-
-const SCORE_EXAMPLES: Record<string, Omit<AudioExample, 'id'>> = {
-  '2.1': {
-    label: '《生日快乐》C 大调｜正文和声骨架',
-    source: '谱例',
-    display: ['C', 'G', 'C', 'G', 'C', 'F', 'C', 'G', 'C'],
-    chords: ['C', 'G', 'C', 'G', 'C', 'F', 'C', 'G', 'C'],
-    note: '不识别图片旋律；依据紧随谱例的正文说明，播放简化和声骨架。',
-  },
-  '2.2': {
-    label: '《生日快乐》G 大调｜移调和声骨架',
-    source: '谱例',
-    display: ['G', 'D', 'G', 'D', 'G', 'C', 'G', 'D', 'G'],
-    chords: ['G', 'D', 'G', 'D', 'G', 'C', 'G', 'D', 'G'],
-    note: '按谱例标题的 G 大调，将正文中的基础和声骨架移调示范。',
-  },
-  '2.3': {
-    label: '《送别》F 大调｜正三和弦示范',
-    source: '谱例',
-    display: ['F', 'C', 'F', 'B♭', 'F', 'C', 'F'],
-    chords: ['F', 'C', 'F', 'Bb', 'F', 'C', 'F'],
-    note: '正文要求使用 F 大调正三和弦；这里演示一条简化骨架，不读取图片旋律。',
-  },
-};
 
 const ROMAN_TO_C: Record<string, string> = {
   I: 'C', i: 'Cm', II: 'D', ii: 'Dm', III: 'E', iii: 'Em',
@@ -140,23 +129,22 @@ function detectTextProgressions(text: string, blockId: string): AudioExample[] {
   return found.slice(0, 6);
 }
 
-function parseBook(source: string): BookBlock[] {
+function parseBook(source: string, scoreResults: ScoreResult[]): BookBlock[] {
   const documentNode = new DOMParser().parseFromString(source, 'text/html');
   const allNodes = [...documentNode.body.children];
   const firstChapter = allNodes.findIndex((node) => node.textContent?.trim().startsWith('第一章'));
   const thirdChapter = allNodes.findIndex((node) => node.textContent?.trim().startsWith('第三章'));
   const selected = allNodes.slice(firstChapter, thirdChapter);
   const blocks: BookBlock[] = [];
-  let pendingScore: { number: string; audio: Omit<AudioExample, 'id'> } | null = null;
+  const scoresById = new Map(scoreResults.map((score) => [score.id, score]));
+  let pendingScoreNumber: string | null = null;
   let inSecondChapter = false;
   selected.forEach((node, index) => {
     const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     const className = node.getAttribute('class') ?? '';
     if (text.startsWith('第二章')) inSecondChapter = true;
     const scoreMatch = text.match(/^谱例(2\.[123])/);
-    if (scoreMatch && SCORE_EXAMPLES[scoreMatch[1]]) {
-      pendingScore = { number: scoreMatch[1], audio: SCORE_EXAMPLES[scoreMatch[1]] };
-    }
+    if (scoreMatch) pendingScoreNumber = scoreMatch[1];
     node.querySelectorAll('img').forEach((image) => {
       image.setAttribute('loading', 'lazy');
       image.removeAttribute('width');
@@ -166,17 +154,17 @@ function parseBook(source: string): BookBlock[] {
       : className.includes('headline-level-2') ? 'section' : node.querySelector('img') ? 'image' : 'text';
     const id = `book-block-${index}`;
     const audio = scoreMatch || !inSecondChapter ? [] : detectTextProgressions(text, id);
-    if (kind === 'image' && pendingScore) {
-      audio.unshift({ ...pendingScore.audio, id: `score-${pendingScore.number}` });
-      pendingScore = null;
-    }
-    blocks.push({ id, html: node.outerHTML, text, kind, audio });
+    const score = kind === 'image' && pendingScoreNumber
+      ? scoresById.get(pendingScoreNumber)
+      : undefined;
+    if (kind === 'image' && pendingScoreNumber) pendingScoreNumber = null;
+    blocks.push({ id, html: node.outerHTML, text, kind, audio, score });
   });
   return blocks;
 }
 
-function scheduleChord(context: AudioContext, destination: AudioNode, chord: string, start: number, duration: number, nodes: OscillatorNode[]) {
-  chordToMidi(chord).forEach((midi, noteIndex) => {
+function scheduleNotes(context: AudioContext, destination: AudioNode, midiNotes: number[], start: number, duration: number, nodes: OscillatorNode[]) {
+  midiNotes.forEach((midi, noteIndex) => {
     const frequency = 440 * 2 ** ((midi - 69) / 12);
     const partials: Array<[OscillatorType, number, number]> = [['sine', 1, 0.075], ['triangle', 2, 0.018], ['sine', 3, 0.008]];
     partials.forEach(([type, multiple, volume]) => {
@@ -193,6 +181,10 @@ function scheduleChord(context: AudioContext, destination: AudioNode, chord: str
       nodes.push(oscillator);
     });
   });
+}
+
+function scheduleChord(context: AudioContext, destination: AudioNode, chord: string, start: number, duration: number, nodes: OscillatorNode[]) {
+  scheduleNotes(context, destination, chordToMidi(chord), start, duration, nodes);
 }
 
 function AudioCard({ example, playback, onPlay, onStop }: {
@@ -229,6 +221,41 @@ function AudioCard({ example, playback, onPlay, onStop }: {
   );
 }
 
+function ScoreAudioCard({ score, playback, onPlay, onStop }: {
+  score: ScoreResult;
+  playback: PlaybackState;
+  onPlay: (score: ScoreResult, tempo: number) => void;
+  onStop: () => void;
+}) {
+  const [tempo, setTempo] = useState(score.bpm);
+  const active = playback?.id === `score-${score.id}`;
+  const progress = active && score.eventCount > 1
+    ? (playback.step / (score.eventCount - 1)) * 100
+    : 0;
+
+  return (
+    <section className={`score-audio-card ${active ? 'is-playing' : ''}`} aria-label={`谱例 ${score.id} MIDI`}>
+      <div className="score-audio-heading">
+        <span className="source-badge score">HOMR 识谱</span>
+        <strong>谱例 {score.id} · MIDI 播放</strong>
+        <span className="verified-dot">已转换</span>
+      </div>
+      <div className="score-player-row">
+        <button type="button" className="play-button" onClick={() => active ? onStop() : onPlay(score, tempo)}>
+          <span aria-hidden="true">{active ? '■' : '▶'}</span>{active ? '停止' : '播放原谱'}
+        </button>
+        <div className="midi-progress" aria-label="播放进度"><span style={{ width: `${progress}%` }} /></div>
+        <span className="event-count">{score.eventCount} 个音符事件</span>
+      </div>
+      <div className="score-meta-row">
+        <label>速度<input type="range" min="56" max="132" value={tempo} onChange={(event) => setTempo(Number(event.target.value))} /><output>{tempo} BPM</output></label>
+        <span className="score-downloads"><a href={score.midiUrl} download>下载 MIDI</a><a href={score.musicXmlUrl} download>MusicXML</a></span>
+      </div>
+      <p className="score-disclaimer">由 HOMR 从谱例图片自动识别，未用正文和弦替代；正式版仍需逐条听校。</p>
+    </section>
+  );
+}
+
 export default function Home() {
   const [blocks, setBlocks] = useState<BookBlock[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -237,10 +264,17 @@ export default function Home() {
   const stopRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    fetch('/book-source.html').then((response) => {
-      if (!response.ok) throw new Error('无法读取书稿');
-      return response.text();
-    }).then((source) => setBlocks(parseBook(source))).catch(() => setLoadError('书稿载入失败，请刷新页面重试。'));
+    Promise.all([
+      fetch('/book-source.html').then((response) => {
+        if (!response.ok) throw new Error('无法读取书稿');
+        return response.text();
+      }),
+      fetch('/score-audio/manifest.json').then((response) => {
+        if (!response.ok) throw new Error('无法读取谱例音频');
+        return response.json() as Promise<{ scores: ScoreResult[] }>;
+      }),
+    ]).then(([source, manifest]) => setBlocks(parseBook(source, manifest.scores)))
+      .catch(() => setLoadError('书稿或谱例音频载入失败，请刷新页面重试。'));
   }, []);
 
   useEffect(() => {
@@ -291,8 +325,47 @@ export default function Home() {
     };
   }, []);
 
+  const playScore = useCallback((score: ScoreResult, selectedTempo: number) => {
+    stopRef.current();
+    const context = new window.AudioContext();
+    const master = context.createGain();
+    master.gain.value = 0.95;
+    master.connect(context.destination);
+    const nodes: OscillatorNode[] = [];
+    const timers: number[] = [];
+    let cancelled = false;
+    const secondsPerBeat = 60 / selectedTempo;
+    const startAt = context.currentTime + 0.06;
+
+    score.events.forEach((event, index) => {
+      scheduleNotes(
+        context,
+        master,
+        event.notes,
+        startAt + event.at * secondsPerBeat,
+        Math.max(0.08, event.duration * secondsPerBeat),
+        nodes,
+      );
+      timers.push(window.setTimeout(() => {
+        if (!cancelled) setPlayback({ id: `score-${score.id}`, step: index });
+      }, (event.at * secondsPerBeat + 0.06) * 1000));
+    });
+
+    const finalEvent = score.events.at(-1);
+    const totalBeats = finalEvent ? finalEvent.at + finalEvent.duration : 0;
+    timers.push(window.setTimeout(() => !cancelled && setPlayback(null), (totalBeats * secondsPerBeat + 0.12) * 1000));
+    setPlayback({ id: `score-${score.id}`, step: 0 });
+    stopRef.current = () => {
+      cancelled = true;
+      timers.forEach(window.clearTimeout);
+      nodes.forEach((node) => { try { node.stop(); } catch { /* already finished */ } });
+      void context.close();
+    };
+  }, []);
+
   useEffect(() => () => stopRef.current(), []);
-  const audioCount = blocks.reduce((total, block) => total + block.audio.length, 0);
+  const textAudioCount = blocks.reduce((total, block) => total + block.audio.length, 0);
+  const scoreAudioCount = blocks.filter((block) => block.score).length;
 
   return (
     <div className="site-shell">
@@ -307,14 +380,14 @@ export default function Home() {
           <p className="eyebrow">阅读目录</p>
           <a href="#chapter-one"><span>01</span>循环与网格图</a>
           <a href="#chapter-two"><span>02</span>大调和声</a>
-          <div className="rail-note"><b>{audioCount || '—'}</b><span>条可试听内容</span><small>谱例 + 正文进行</small></div>
+          <div className="rail-note"><b>{textAudioCount + scoreAudioCount || '—'}</b><span>条可试听内容</span><small>{scoreAudioCount} 个谱例 · {textAudioCount} 条正文进行</small></div>
         </aside>
         <main className="reader">
           <section className="reader-intro">
             <p className="eyebrow">Harmony you can hear</p>
             <h1>读到和弦，也立刻听见和弦</h1>
-            <p>本 Demo 保留书稿原文与插图。橙色卡片来自谱例，蓝色卡片来自正文中明确写出的和声进行；点击即可试听。</p>
-            <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />谱例音频</span><span><i className="legend-text" />正文进行</span><span><i className="legend-image" />原图不做内容识别</span></div>
+            <p>本 Demo 保留书稿原文与插图。橙色卡片是 HOMR 从谱例图片识别得到的 MIDI，蓝色卡片只来自正文中明确写出的和声进行。</p>
+            <div className="legend" aria-label="音频标记说明"><span><i className="legend-score" />HOMR 谱例 MIDI</span><span><i className="legend-text" />正文和声进行</span><span><i className="legend-image" />自动识谱待听校</span></div>
           </section>
           {loadError && <p className="load-state error">{loadError}</p>}
           {!loadError && blocks.length === 0 && <p className="load-state">正在整理第一、二章内容…</p>}
@@ -322,13 +395,14 @@ export default function Home() {
             {blocks.map((block) => (
               <div className={`book-block book-${block.kind}`} id={block.kind === 'chapter' ? block.text.startsWith('第一章') ? 'chapter-one' : 'chapter-two' : block.id} key={block.id}>
                 <div dangerouslySetInnerHTML={{ __html: block.html }} />
+                {block.score && <ScoreAudioCard score={block.score} playback={playback} onPlay={playScore} onStop={stop} />}
                 {block.audio.map((example) => <AudioCard key={example.id} example={example} playback={playback} onPlay={play} onStop={stop} />)}
               </div>
             ))}
           </article>
         </main>
         <aside className="listening-rail">
-          <div className="listening-card"><span className="sound-orbit" aria-hidden="true">♪</span><p className="eyebrow">试听规则</p><h2>正文优先，谱图不猜</h2><p>谱例只采用标题与相邻正文能确认的和声骨架，不读取图片内的旋律和配器细节。</p></div>
+          <div className="listening-card"><span className="sound-orbit" aria-hidden="true">♪</span><p className="eyebrow">试听规则</p><h2>正文不猜，谱图走 OMR</h2><p>和声进行只读取正文中的明确写法；谱例图片由 HOMR 转为 MusicXML 与 MIDI，并保留下载结果供校对。</p></div>
           {playback && <button className="floating-stop" type="button" onClick={stop}><span>■</span> 停止当前音频</button>}
         </aside>
       </div>
