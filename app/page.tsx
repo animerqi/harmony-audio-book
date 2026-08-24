@@ -33,6 +33,13 @@ type BookBlock = {
 };
 
 type PlaybackState = { id: string; step: number } | null;
+type ReaderFont = 'serif' | 'sans' | 'system';
+
+const READER_FONT_STACKS: Record<ReaderFont, string> = {
+  serif: '"Noto Serif SC", "Songti SC", "STSong", Georgia, serif',
+  sans: '"Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif',
+  system: 'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif',
+};
 
 function blockAnchor(block: BookBlock) {
   if (block.kind === 'chapter') {
@@ -272,7 +279,45 @@ export default function Home() {
   const [loadError, setLoadError] = useState('');
   const [playback, setPlayback] = useState<PlaybackState>(null);
   const [readingProgress, setReadingProgress] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [readerFont, setReaderFont] = useState<ReaderFont>('serif');
+  const [readerFontSize, setReaderFontSize] = useState(16);
+  const [readerLineHeight, setReaderLineHeight] = useState(2);
+  const [settingsReady, setSettingsReady] = useState(false);
   const stopRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('harmony-reader-settings') ?? '{}') as {
+        font?: ReaderFont;
+        fontSize?: number;
+        lineHeight?: number;
+      };
+      if (saved.font && READER_FONT_STACKS[saved.font]) setReaderFont(saved.font);
+      if (saved.fontSize && saved.fontSize >= 13 && saved.fontSize <= 22) setReaderFontSize(saved.fontSize);
+      if (saved.lineHeight && saved.lineHeight >= 1.5 && saved.lineHeight <= 2.5) setReaderLineHeight(saved.lineHeight);
+    } catch {
+      // Ignore invalid local preferences and retain comfortable defaults.
+    }
+    setSettingsReady(true);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--reader-font-family', READER_FONT_STACKS[readerFont]);
+    document.documentElement.style.setProperty('--reader-font-size', `${readerFontSize}px`);
+    document.documentElement.style.setProperty('--reader-line-height', String(readerLineHeight));
+    if (settingsReady) {
+      localStorage.setItem('harmony-reader-settings', JSON.stringify({ font: readerFont, fontSize: readerFontSize, lineHeight: readerLineHeight }));
+    }
+  }, [readerFont, readerFontSize, readerLineHeight, settingsReady]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSettingsOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -392,8 +437,20 @@ export default function Home() {
       <header className="site-header">
         <a className="brand" href="#top" aria-label="回到页首"><span className="brand-mark" aria-hidden="true">♫</span><span><strong>图解和声</strong><small>听觉阅读 Demo</small></span></a>
         <nav aria-label="章节导航"><a href="#chapter-one">第一章</a><a href="#chapter-two">第二章</a></nav>
-        <span className="demo-pill">第一、二章</span>
+        <div className="header-actions"><button className="settings-trigger" type="button" aria-expanded={settingsOpen} aria-controls="reader-settings" onClick={() => setSettingsOpen((value) => !value)}><span>Aa</span> 阅读设置</button><span className="demo-pill">第一、二章</span></div>
       </header>
+      {settingsOpen && (
+        <section className="reader-settings" id="reader-settings" aria-label="阅读设置">
+          <div className="settings-heading"><div><p className="eyebrow">阅读设置</p><h2>让正文更适合你的屏幕</h2></div><button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭阅读设置">×</button></div>
+          <div className="font-choice" aria-label="字体风格">
+            {([['serif', '宋体'], ['sans', '黑体'], ['system', '系统']] as Array<[ReaderFont, string]>).map(([value, label]) => <button className={readerFont === value ? 'active' : ''} type="button" key={value} onClick={() => setReaderFont(value)}>{label}</button>)}
+          </div>
+          <label className="setting-slider"><span>正文字号 <output>{readerFontSize}px</output></span><input type="range" min="13" max="22" step="1" value={readerFontSize} onChange={(event) => setReaderFontSize(Number(event.target.value))} /></label>
+          <label className="setting-slider"><span>正文行距 <output>{readerLineHeight.toFixed(1)}</output></span><input type="range" min="1.5" max="2.5" step="0.1" value={readerLineHeight} onChange={(event) => setReaderLineHeight(Number(event.target.value))} /></label>
+          <div className="settings-preview" aria-live="polite">和声从稳定出发，经过运动与紧张，最终回到新的平衡。</div>
+          <button className="settings-reset" type="button" onClick={() => { setReaderFont('serif'); setReaderFontSize(16); setReaderLineHeight(2); }}>恢复默认</button>
+        </section>
+      )}
       <div className="page-layout" id="top">
         <aside className="chapter-rail">
           <p className="eyebrow">阅读目录</p>
