@@ -191,6 +191,13 @@ function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础�
   const addBlock = (node: Element, kindOverride?: BookBlock['kind']) => {
     const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     const className = node.getAttribute('class') ?? '';
+    if (className.includes('headline-level-5')) {
+      node.setAttribute('role', 'heading');
+      node.setAttribute('aria-level', '3');
+    } else if (className.includes('headline-level-6')) {
+      node.setAttribute('role', 'heading');
+      node.setAttribute('aria-level', '4');
+    }
     const scoreReference = text.match(/谱例\s*([0-9]+(?:\.[0-9]+)+)/);
     const isScoreCaption = /^谱例\s*[0-9]/.test(text);
     if (scoreReference) {
