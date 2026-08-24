@@ -129,6 +129,32 @@ def discover_scores() -> list[dict[str, str]]:
                 patience -= 1
                 if patience <= 0 or "headline-level" in line or line.lstrip().startswith("<h1"):
                     pending_id = None
+
+        # Chapter 13 frequently presents several score excerpts under one prose
+        # introduction without repeating a numbered "谱例" caption.  Register
+        # every still-unseen image in that chapter and let HOMR's staff detector
+        # decide whether it is actually playable notation.  The section-local
+        # image number is descriptive only; it does not invent a book score ID.
+        if volume == "advanced":
+            current_section = ""
+            section_image_index: dict[str, int] = {}
+            for line in source.splitlines():
+                if re.search(r"<h1\b", line, re.IGNORECASE):
+                    heading_match = re.match(r"^(\d+-\d+)\b", plain_text(line))
+                    current_section = heading_match.group(1) if heading_match and heading_match.group(1).startswith("13-") else ""
+                if not current_section:
+                    continue
+                for image_match in IMAGE_TAG.finditer(line):
+                    section_image_index[current_section] = section_image_index.get(current_section, 0) + 1
+                    image_seq = attr(image_match.group(0), "data-seq")
+                    if image_seq and image_seq in seen_images:
+                        continue
+                    image_number = section_image_index[current_section]
+                    register_score(
+                        f"{current_section} 图{image_number}",
+                        f"{current_section} 未编号谱图（本节第{image_number}张）",
+                        image_match.group(0),
+                    )
         (PUBLIC_BOOKS / f"{volume}.html").write_text(rewritten, encoding="utf-8")
     INDEX.parent.mkdir(parents=True, exist_ok=True)
     INDEX.write_text(json.dumps(specs, ensure_ascii=False, indent=2), encoding="utf-8")

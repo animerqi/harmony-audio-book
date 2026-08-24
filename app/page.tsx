@@ -209,8 +209,9 @@ function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础�
     const id = `${volumeKey}-block-${generatedIndex++}`;
     const audio = isScoreCaption ? [] : detectTextProgressions(text, id);
     const imageSeq = node.querySelector('img')?.getAttribute('data-seq') ?? undefined;
-    const score = kind === 'image' && pendingScoreNumber
-      ? (imageSeq ? scoresByImage.get(imageSeq) : undefined) ?? scoresById.get(pendingScoreNumber)
+    const score = kind === 'image'
+      ? (imageSeq ? scoresByImage.get(imageSeq) : undefined)
+        ?? (pendingScoreNumber ? scoresById.get(pendingScoreNumber) : undefined)
       : undefined;
     blocks.push({ id, volume, html: node.outerHTML, text, kind, audio, score });
     if (pendingScoreNumber && kind === 'image') pendingScoreHasImage = true;
