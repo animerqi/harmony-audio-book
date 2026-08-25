@@ -10,7 +10,9 @@
     "build": "vinext build",
     "build:pages": "next build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:progressions": "node --experimental-strip-types --test tests/progression-detector.test.mjs",
+    "audit:progressions": "node --experimental-strip-types scripts/audit-progressions.mjs"
   },
   "dependencies": {
     "next": "16.2.6",

@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { pianoEngine, type PianoEngineStatus } from '../lib/audio/piano-engine';
+import {
+  extractAbsoluteProgressions,
+  extractRomanProgressions,
+  normalizeProgressionSymbols,
+} from '../lib/harmony/progression-detector';
 
 type AudioExample = {
   id: string;
@@ -92,8 +97,7 @@ const NOTE_INDEX: Record<string, number> = {
 };
 
 function normalizeSymbols(value: string) {
-  return value.replaceAll('♯', '#').replaceAll('♭', 'b').replaceAll('–', '—')
-    .replaceAll('→', '—').replace(/\s+/g, ' ').trim();
+  return normalizeProgressionSymbols(value);
 }
 
 function chordToMidi(symbol: string): number[] {
@@ -132,11 +136,6 @@ type RomanAst = {
   inversion?: number;
   secondaryOf?: RomanAst;
 };
-
-const ROMAN_TOKEN_SOURCE = '[#b♯♭]?\\s*(?:(?:Ger|Gr|Fr|It)\\+6|N6|k46|(?:vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I)(?:(?:°|ø|\\+)?(?:\\(?\\d{1,2}\\)?|Δ)?(?:\\/[#b♯♭]?(?:vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I))?))';
-const ROMAN_PATTERN = new RegExp(`(${ROMAN_TOKEN_SOURCE}(?:\\s*(?:—|–|-|→|至|到)\\s*${ROMAN_TOKEN_SOURCE}){1,12})`, 'g');
-const ABSOLUTE_CHORD_SOURCE = '[A-G](?:#|b)?(?:m7b5|maj(?:7|9)?|min(?:7)?|m(?:7|9)?|dim7?|°7?|ø7?|aug7?|\\+7?|7|Δ)?(?:\\/[A-G](?:#|b)?)?';
-const ABSOLUTE_PATTERN = new RegExp(`(${ABSOLUTE_CHORD_SOURCE}(?:\\s*(?:—|–|-|→)\\s*${ABSOLUTE_CHORD_SOURCE}){1,12})`, 'g');
 
 function detectHarmonyContext(text: string, fallback: HarmonyContext = { tonic: 'C', mode: 'major' }): HarmonyContext {
   const match = text.match(/([A-Ga-g](?:#|b|♯|♭)?)\s*(大调|小调|major|minor|maj|moll)/);
@@ -231,10 +230,6 @@ function digitsToProgression(digits: string, context: HarmonyContext) {
   };
 }
 
-function splitProgression(value: string) {
-  return value.replace(/[–→至到]/g, '—').split(/\s*—\s*|\s*-\s*/).map((item) => item.trim()).filter(Boolean);
-}
-
 function detectTextProgressions(text: string, blockId: string, emphasis: string[] = [], inheritedContext?: HarmonyContext): AudioExample[] {
   const normalized = normalizeSymbols(text);
   const context = detectHarmonyContext(normalized, inheritedContext);
@@ -247,17 +242,12 @@ function detectTextProgressions(text: string, blockId: string, emphasis: string[
     found.push({ id: `${blockId}-${found.length}`, label: label ?? `${display.join('—')}｜正文进行`, source: '正文', display, chords });
   };
   const sources = [...emphasis, normalized];
-  const noteMotionContext = /(?:音阶|半音|旋律|低音|高音|音符|音程|上行|下行|从[A-G]|由[A-G])/.test(normalized);
   const progressionContext = /进行|终止|套路|序进|连接|循环|演奏|弹奏/.test(normalized);
   for (const [sourceIndex, source] of sources.entries()) {
-    for (const match of source.matchAll(ABSOLUTE_PATTERN)) {
-      const sequence = splitProgression(match[1]);
-      const hasChordQuality = sequence.some((token) => /(?:maj|min|m7b5|m|dim|°|ø|aug|\+|\d|Δ|\/[A-G])/.test(token));
-      if (!hasChordQuality && sourceIndex === sources.length - 1 && (!progressionContext || noteMotionContext)) continue;
+    for (const sequence of extractAbsoluteProgressions(source)) {
       add(sequence, sequence, `${sequence.join('—')}｜正文和弦进行`);
     }
-    for (const match of source.matchAll(ROMAN_PATTERN)) {
-      const sequence = splitProgression(match[1]);
+    for (const sequence of extractRomanProgressions(source)) {
       add(sequence, sequence.map((token) => romanTokenToChord(token, context)), `${sequence.join('—')}｜正文级数进行`);
     }
     for (const match of source.matchAll(/[“"（(]((?:[1-7](?:\s*[-—]\s*[b#]?[1-7]){2,12})|[1-7]{3,12})[”"）)]/g)) {
