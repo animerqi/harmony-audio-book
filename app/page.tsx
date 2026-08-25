@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { pianoEngine, type PianoEngineStatus } from '../lib/audio/piano-engine';
 
 type AudioExample = {
   id: string;
@@ -419,30 +420,6 @@ function paginateBook(blocks: BookBlock[]): SectionPage[] {
   return pages;
 }
 
-function scheduleNotes(context: AudioContext, destination: AudioNode, midiNotes: number[], start: number, duration: number, nodes: OscillatorNode[]) {
-  midiNotes.forEach((midi, noteIndex) => {
-    const frequency = 440 * 2 ** ((midi - 69) / 12);
-    const partials: Array<[OscillatorType, number, number]> = [['sine', 1, 0.075], ['triangle', 2, 0.018], ['sine', 3, 0.008]];
-    partials.forEach(([type, multiple, volume]) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = type;
-      oscillator.frequency.value = frequency * multiple;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(volume / Math.max(1, noteIndex * 0.15 + 1), start + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration * 0.94);
-      oscillator.connect(gain).connect(destination);
-      oscillator.start(start);
-      oscillator.stop(start + duration);
-      nodes.push(oscillator);
-    });
-  });
-}
-
-function scheduleChord(context: AudioContext, destination: AudioNode, chord: string, start: number, duration: number, nodes: OscillatorNode[]) {
-  scheduleNotes(context, destination, chordToMidi(chord), start, duration, nodes);
-}
-
 function AudioCard({ example, playback, onPlay, onStop }: {
   example: AudioExample;
   playback: PlaybackState;
@@ -517,6 +494,8 @@ export default function Home() {
   const [blocks, setBlocks] = useState<BookBlock[]>([]);
   const [loadError, setLoadError] = useState('');
   const [playback, setPlayback] = useState<PlaybackState>(null);
+  const [audioStatus, setAudioStatus] = useState<PianoEngineStatus>('idle');
+  const [audioError, setAudioError] = useState('');
   const [readingProgress, setReadingProgress] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileTocOpen, setMobileTocOpen] = useState(false);
@@ -525,8 +504,6 @@ export default function Home() {
   const [readerLineHeight, setReaderLineHeight] = useState(2);
   const [currentSectionId, setCurrentSectionId] = useState('');
   const [settingsReady, setSettingsReady] = useState(false);
-  const stopRef = useRef<() => void>(() => undefined);
-
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('harmony-reader-settings') ?? '{}') as {
@@ -607,83 +584,56 @@ export default function Home() {
   }, []);
 
   const stop = useCallback(() => {
-    stopRef.current();
-    stopRef.current = () => undefined;
+    pianoEngine.stop();
     setPlayback(null);
+    setAudioStatus((status) => status === 'loading' ? 'idle' : status);
   }, []);
 
-  const play = useCallback((example: AudioExample, tempo: number, loop: boolean) => {
-    stopRef.current();
-    const context = new window.AudioContext();
-    const master = context.createGain();
-    master.gain.value = 0.88;
-    master.connect(context.destination);
-    const nodes: OscillatorNode[] = [];
-    const timers: number[] = [];
-    let cancelled = false;
-    const chordDuration = (60 / tempo) * 1.8;
-    const runCycle = () => {
-      if (cancelled) return;
-      const cycleStart = context.currentTime + 0.06;
-      example.chords.forEach((chord, index) => {
-        scheduleChord(context, master, chord, cycleStart + index * chordDuration, chordDuration, nodes);
-        timers.push(window.setTimeout(() => !cancelled && setPlayback({ id: example.id, step: index }), (index * chordDuration + 0.06) * 1000));
-      });
-      timers.push(window.setTimeout(() => {
-        if (cancelled) return;
-        if (loop) runCycle(); else setPlayback(null);
-      }, (example.chords.length * chordDuration + 0.08) * 1000));
-    };
+  const play = useCallback(async (example: AudioExample, tempo: number, loop: boolean) => {
+    stop();
+    setAudioError('');
+    setAudioStatus('loading');
     setPlayback({ id: example.id, step: 0 });
-    runCycle();
-    stopRef.current = () => {
-      cancelled = true;
-      timers.forEach(window.clearTimeout);
-      nodes.forEach((node) => { try { node.stop(); } catch { /* already finished */ } });
-      void context.close();
-    };
-  }, []);
-
-  const playScore = useCallback((score: ScoreResult, selectedTempo: number) => {
-    stopRef.current();
-    const context = new window.AudioContext();
-    const master = context.createGain();
-    master.gain.value = 0.95;
-    master.connect(context.destination);
-    const nodes: OscillatorNode[] = [];
-    const timers: number[] = [];
-    let cancelled = false;
-    const secondsPerBeat = 60 / selectedTempo;
-    const startAt = context.currentTime + 0.06;
-    const playbackKey = score.key ?? score.imageSeq ?? score.id;
-
-    score.events.forEach((event, index) => {
-      scheduleNotes(
-        context,
-        master,
-        event.notes,
-        startAt + event.at * secondsPerBeat,
-        Math.max(0.08, event.duration * secondsPerBeat),
-        nodes,
+    try {
+      await pianoEngine.playProgression(
+        example.chords.map(chordToMidi),
+        tempo,
+        loop,
+        {
+          onStep: (step) => setPlayback({ id: example.id, step }),
+          onEnd: () => setPlayback(null),
+          onStatus: setAudioStatus,
+        },
       );
-      timers.push(window.setTimeout(() => {
-        if (!cancelled) setPlayback({ id: `score-${playbackKey}`, step: index });
-      }, (event.at * secondsPerBeat + 0.06) * 1000));
-    });
+      setAudioStatus('ready');
+    } catch {
+      setPlayback(null);
+      setAudioStatus('error');
+      setAudioError('钢琴音色加载失败，请重试。');
+    }
+  }, [stop]);
 
-    const finalEvent = score.events.at(-1);
-    const totalBeats = finalEvent ? finalEvent.at + finalEvent.duration : 0;
-    timers.push(window.setTimeout(() => !cancelled && setPlayback(null), (totalBeats * secondsPerBeat + 0.12) * 1000));
+  const playScore = useCallback(async (score: ScoreResult, selectedTempo: number) => {
+    stop();
+    setAudioError('');
+    setAudioStatus('loading');
+    const playbackKey = score.key ?? score.imageSeq ?? score.id;
     setPlayback({ id: `score-${playbackKey}`, step: 0 });
-    stopRef.current = () => {
-      cancelled = true;
-      timers.forEach(window.clearTimeout);
-      nodes.forEach((node) => { try { node.stop(); } catch { /* already finished */ } });
-      void context.close();
-    };
-  }, []);
+    try {
+      await pianoEngine.playEvents(score.events, selectedTempo, {
+        onStep: (step) => setPlayback({ id: `score-${playbackKey}`, step }),
+        onEnd: () => setPlayback(null),
+        onStatus: setAudioStatus,
+      });
+      setAudioStatus('ready');
+    } catch {
+      setPlayback(null);
+      setAudioStatus('error');
+      setAudioError('钢琴音色加载失败，请重试。');
+    }
+  }, [stop]);
 
-  useEffect(() => () => stopRef.current(), []);
+  useEffect(() => () => pianoEngine.dispose(), []);
   const sectionPages = useMemo(() => paginateBook(blocks), [blocks]);
   const activePageIndex = Math.max(0, sectionPages.findIndex((page) => page.id === currentSectionId));
   const activePage = sectionPages[activePageIndex];
@@ -784,6 +734,7 @@ export default function Home() {
             <h1>图解和声</h1>
             <p className="cover-author">叶小胖 著</p>
           </section>
+          {(audioStatus === 'loading' || audioStatus === 'error') && <p className={`load-state ${audioStatus === 'error' ? 'error' : ''}`} role="status" aria-live="polite">{audioStatus === 'loading' ? '正在加载钢琴音色…' : audioError}</p>}
           {loadError && <p className="load-state error">{loadError}</p>}
           {!loadError && blocks.length === 0 && <p className="load-state">正在整理基础篇与高级篇内容…</p>}
           {activePage && (
