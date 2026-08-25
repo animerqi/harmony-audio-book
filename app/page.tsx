@@ -120,72 +120,162 @@ function chordToMidi(symbol: string): number[] {
   return notes;
 }
 
-function romanTokenToChord(token: string) {
-  const clean = normalizeSymbols(token).replace(/[()]/g, '');
-  const accidental = clean.match(/^[#b]/)?.[0] ?? '';
-  const roman = clean.replace(/^[#b]/, '').match(/^(?:vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)/)?.[0] ?? 'I';
-  const degreeOffsets: Record<string, number> = { I: 0, II: 2, III: 4, IV: 5, V: 7, VI: 9, VII: 11 };
-  let pitchClass = degreeOffsets[roman.toUpperCase()] ?? 0;
-  if (accidental === '#') pitchClass += 1;
-  if (accidental === 'b') pitchClass -= 1;
+type HarmonyContext = { tonic: string; mode: 'major' | 'minor' };
+
+type RomanAst = {
+  display: string;
+  degree: number;
+  accidental: number;
+  quality: 'major' | 'minor' | 'diminished' | 'half-diminished' | 'augmented';
+  extension?: string;
+  inversion?: number;
+  secondaryOf?: RomanAst;
+};
+
+const ROMAN_TOKEN_SOURCE = '[#b♯♭]?\\s*(?:(?:Ger|Gr|Fr|It)\\+6|N6|k46|(?:vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I)(?:(?:°|ø|\\+)?(?:\\(?\\d{1,2}\\)?|Δ)?(?:\\/[#b♯♭]?(?:vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I))?))';
+const ROMAN_PATTERN = new RegExp(`(${ROMAN_TOKEN_SOURCE}(?:\\s*(?:—|–|-|→|至|到)\\s*${ROMAN_TOKEN_SOURCE}){1,12})`, 'g');
+const ABSOLUTE_CHORD_SOURCE = '[A-G](?:#|b)?(?:m7b5|maj(?:7|9)?|min(?:7)?|m(?:7|9)?|dim7?|°7?|ø7?|aug7?|\\+7?|7|Δ)?(?:\\/[A-G](?:#|b)?)?';
+const ABSOLUTE_PATTERN = new RegExp(`(${ABSOLUTE_CHORD_SOURCE}(?:\\s*(?:—|–|-|→)\\s*${ABSOLUTE_CHORD_SOURCE}){1,12})`, 'g');
+
+function detectHarmonyContext(text: string, fallback: HarmonyContext = { tonic: 'C', mode: 'major' }): HarmonyContext {
+  const match = text.match(/([A-Ga-g](?:#|b|♯|♭)?)\s*(大调|小调|major|minor|maj|moll)/);
+  if (!match) return fallback;
+  const tonic = normalizeSymbols(match[1]).replace(/^([a-g])$/, (_, letter: string) => letter.toUpperCase());
+  return { tonic, mode: /小调|minor|moll/.test(match[2]) ? 'minor' : 'major' };
+}
+
+function pitchName(pitchClass: number, preferFlats: boolean) {
   const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-  const root = (accidental === 'b' ? flatNames : sharpNames)[(pitchClass + 12) % 12];
-  const seventh = /7|Δ/.test(clean);
-  if (/ø/.test(clean)) return `${root}m7b5`;
-  if (/°/.test(clean)) return `${root}${seventh ? 'dim7' : 'dim'}`;
-  if (/\+/.test(clean)) return `${root}aug${seventh ? '7' : ''}`;
-  const minor = roman === roman.toLowerCase();
-  if (!seventh) return `${root}${minor ? 'm' : ''}`;
-  if (/Δ/.test(clean)) return `${root}maj7`;
-  return `${root}${minor ? 'm7' : '7'}`;
+  return (preferFlats ? flatNames : sharpNames)[(pitchClass + 120) % 12];
 }
 
-function digitsToProgression(digits: string) {
-  const mapping: Record<string, [string, string]> = {
-    '1': ['I', 'C'], '2': ['ii', 'Dm'], '3': ['iii', 'Em'], '4': ['IV', 'F'],
-    '5': ['V', 'G'], '6': ['vi', 'Am'], '7': ['vii°', 'Bdim'],
-  };
+function parseRomanAst(token: string): RomanAst {
+  const clean = normalizeSymbols(token).replace(/[()\s]/g, '');
+  if (/^(?:[#b]?)(?:v|V|iv|IV|iii|III|ii|II|i|I|vi|VI|vii|VII)(?:[°ø+]?\d{0,2})?(?:\/(?:[#b]?)(?:v|V|iv|IV|iii|III|ii|II|i|I|vi|VI|vii|VII))?$/.test(clean)) {
+    const expanded = clean.match(/^([#b]?)(vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I)(?:(°|ø|\+)?(\d{1,2})?|Δ)?(?:\/([#b]?)(vii|VII|vi|VI|v|V|iv|IV|iii|III|ii|II|i|I))?$/);
+    if (expanded) {
+      const [, accidentalSymbol, roman, mark, extension, secondaryAccidental, secondaryRoman] = expanded;
+      const degreeMap: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
+      const degree = degreeMap[roman.toUpperCase()] ?? 1;
+      const accidental = accidentalSymbol === '#' ? 1 : accidentalSymbol === 'b' ? -1 : 0;
+      const quality = mark === '°' ? 'diminished' : mark === 'ø' ? 'half-diminished' : mark === '+' ? 'augmented' : roman === roman.toLowerCase() ? 'minor' : 'major';
+      const inversion = extension === '6' ? 1 : extension === '64' ? 2 : extension === '65' ? 1 : extension === '43' ? 2 : extension === '42' ? 3 : undefined;
+      const ast: RomanAst = { display: clean, degree, accidental, quality, extension, inversion };
+      if (secondaryRoman) ast.secondaryOf = parseRomanAst(`${secondaryAccidental ?? ''}${secondaryRoman}`);
+      return ast;
+    }
+  }
+  const special = clean.match(/^(?:([#b]?)(Ger|Gr|Fr|It)\+6|([#b]?)N6|k46)$/i);
+  if (special) {
+    const symbol = special[2] ? `${special[1] ?? ''}${special[2]}+6` : special[3] !== undefined ? `${special[3]}N6` : 'k46';
+    return { display: symbol, degree: special[2] ? 6 : 2, accidental: -1, quality: special[2] ? 'augmented' : 'major', inversion: 1 };
+  }
+  const match = clean.match(/^([#b]?)(vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)(?:(°|ø|\+)?(\d{1,2})?|Δ)?(?:\/([#b]?)(vii|VII|vi|VI|iii|III|ii|II|i|I))?$/);
+  if (!match) return { display: clean || 'I', degree: 1, accidental: 0, quality: 'major' };
+  const [, accidentalSymbol, roman, mark, extension, secondaryAccidental, secondaryRoman] = match;
+  const degreeMap: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
+  const degree = degreeMap[roman.toUpperCase()] ?? 1;
+  const accidental = accidentalSymbol === '#' ? 1 : accidentalSymbol === 'b' ? -1 : 0;
+  const quality = mark === '°' ? 'diminished' : mark === 'ø' ? 'half-diminished' : mark === '+' ? 'augmented' : roman === roman.toLowerCase() ? 'minor' : 'major';
+  const inversion = extension === '6' ? 1 : extension === '64' ? 2 : extension === '65' ? 1 : extension === '43' ? 2 : extension === '42' ? 3 : undefined;
+  const ast: RomanAst = { display: clean, degree, accidental, quality, extension, inversion };
+  if (secondaryRoman) ast.secondaryOf = parseRomanAst(`${secondaryAccidental ?? ''}${secondaryRoman}`);
+  return ast;
+}
+
+function romanAstToChord(ast: RomanAst, context: HarmonyContext, baseContext = context): string {
+  if (/^(?:[#b]?)(Ger|Gr|Fr|It)\+6$/i.test(ast.display)) {
+    const flatSix = pitchName((NOTE_INDEX[context.tonic] ?? 0) + 8, true);
+    return `${flatSix}7`;
+  }
+  if (/^k46$/i.test(ast.display)) {
+    const tonicPitch = NOTE_INDEX[context.tonic] ?? 0;
+    const fifth = pitchName(tonicPitch + 7, /b|♭/.test(context.tonic));
+    return `${context.tonic}/${fifth}`;
+  }
+  if (/^[#b]?N6$/i.test(ast.display)) {
+    const root = pitchName((NOTE_INDEX[context.tonic] ?? 0) + (context.mode === 'minor' ? 1 : 1), true);
+    return `${root}/${pitchName((NOTE_INDEX[context.tonic] ?? 0) + 5, true)}`;
+  }
+  const scale = baseContext.mode === 'minor' ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+  const targetRoot = ast.secondaryOf ? romanAstToChord(ast.secondaryOf, context, baseContext).match(/^[A-G](?:#|b)?/)?.[0] : context.tonic;
+  const targetPitch = NOTE_INDEX[targetRoot ?? context.tonic] ?? 0;
+  const pitchClass = targetPitch + scale[ast.degree - 1] + ast.accidental;
+  const root = pitchName(pitchClass, ast.accidental < 0 || /b|♭/.test(context.tonic));
+  const seventh = Boolean(ast.extension && /7|Δ/.test(ast.extension));
+  const suffix = ast.quality === 'diminished' ? (seventh ? 'dim7' : 'dim')
+    : ast.quality === 'half-diminished' ? 'm7b5'
+      : ast.quality === 'augmented' ? `aug${seventh ? '7' : ''}`
+        : ast.quality === 'minor' ? (seventh ? 'm7' : 'm')
+          : ast.extension === 'Δ' ? 'maj7' : seventh ? '7' : '';
+  if (ast.inversion) {
+    const intervals = ast.quality === 'minor' ? [0, 3, 7] : [0, 4, 7];
+    const bassInterval = ast.inversion === 1 ? intervals[1] : ast.inversion === 2 ? intervals[2] : 10;
+    return `${root}${suffix}/${pitchName(pitchClass + bassInterval, /b|♭/.test(root))}`;
+  }
+  return `${root}${suffix}`;
+}
+
+function romanTokenToChord(token: string, context: HarmonyContext) {
+  return romanAstToChord(parseRomanAst(token), context);
+}
+
+function digitsToProgression(digits: string, context: HarmonyContext) {
+  const cleanDigits = digits.replace(/[\s—-]/g, '').replaceAll('♭', 'b').replaceAll('♯', '#');
+  const labels = context.mode === 'minor' ? ['i', 'ii°', 'III', 'iv', 'V', 'VI', 'VII'] : ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
   return {
-    display: [...digits].map((digit) => mapping[digit][0]),
-    chords: [...digits].map((digit) => mapping[digit][1]),
+    display: [...cleanDigits].map((digit) => labels[Number(digit) - 1]).filter(Boolean),
+    chords: [...cleanDigits].map((digit) => romanTokenToChord(labels[Number(digit) - 1] ?? 'I', context)).filter(Boolean),
   };
 }
 
-function detectTextProgressions(text: string, blockId: string): AudioExample[] {
+function splitProgression(value: string) {
+  return value.replace(/[–→至到]/g, '—').split(/\s*—\s*|\s*-\s*/).map((item) => item.trim()).filter(Boolean);
+}
+
+function detectTextProgressions(text: string, blockId: string, emphasis: string[] = [], inheritedContext?: HarmonyContext): AudioExample[] {
   const normalized = normalizeSymbols(text);
+  const context = detectHarmonyContext(normalized, inheritedContext);
   const found: AudioExample[] = [];
   const seen = new Set<string>();
   const add = (display: string[], chords: string[], label?: string) => {
-    const key = display.join('—');
-    if (seen.has(key) || display.length < 2) return;
+    const key = `${display.join('—')}|${chords.join('—')}`;
+    if (seen.has(key) || display.length < 2 || chords.length < 2) return;
     seen.add(key);
-    found.push({ id: `${blockId}-${found.length}`, label: label ?? `${key}｜正文进行`, source: '正文', display, chords });
+    found.push({ id: `${blockId}-${found.length}`, label: label ?? `${display.join('—')}｜正文进行`, source: '正文', display, chords });
   };
-
-  const chordToken = '[A-G](?:#|b)?(?:maj7|m7b5|dim7|m7|dim|m|°7|°|\\+7|\\+|7|Δ)?(?:\\/[A-G](?:#|b)?)?';
-  const chordPattern = new RegExp(`(${chordToken}(?:—${chordToken}){1,12})`, 'g');
-  if (/和弦|进行|终止|套路|连接|解决|序进/.test(normalized)) {
-    for (const match of normalized.matchAll(chordPattern)) {
-      const sequence = match[1].split('—');
-      add(sequence, sequence);
+  const sources = [...emphasis, normalized];
+  const noteMotionContext = /(?:音阶|半音|旋律|低音|高音|音符|音程|上行|下行|从[A-G]|由[A-G])/.test(normalized);
+  const progressionContext = /进行|终止|套路|序进|连接|循环|演奏|弹奏/.test(normalized);
+  for (const [sourceIndex, source] of sources.entries()) {
+    for (const match of source.matchAll(ABSOLUTE_PATTERN)) {
+      const sequence = splitProgression(match[1]);
+      const hasChordQuality = sequence.some((token) => /(?:maj|min|m7b5|m|dim|°|ø|aug|\+|\d|Δ|\/[A-G])/.test(token));
+      if (!hasChordQuality && sourceIndex === sources.length - 1 && (!progressionContext || noteMotionContext)) continue;
+      add(sequence, sequence, `${sequence.join('—')}｜正文和弦进行`);
+    }
+    for (const match of source.matchAll(ROMAN_PATTERN)) {
+      const sequence = splitProgression(match[1]);
+      add(sequence, sequence.map((token) => romanTokenToChord(token, context)), `${sequence.join('—')}｜正文级数进行`);
+    }
+    for (const match of source.matchAll(/[“"（(]((?:[1-7](?:\s*[-—]\s*[b#]?[1-7]){2,12})|[1-7]{3,12})[”"）)]/g)) {
+      if (sourceIndex === sources.length - 1 && !progressionContext) continue;
+      const progression = digitsToProgression(match[1], context);
+      add(progression.display, progression.chords, `${match[1]}｜正文级数进行`);
     }
   }
-  const romanToken = '[#b]?(?:vii|VII|vi|VI|iv|IV|iii|III|ii|II|i|I)(?:°|ø|\\+)?(?:\\(?(?:7|Δ)\\)?)?';
-  const romanPattern = new RegExp(`(${romanToken}(?:—${romanToken}){1,12})`, 'g');
-  for (const match of normalized.matchAll(romanPattern)) {
-    const sequence = match[1].split('—');
-    add(sequence, sequence.map(romanTokenToChord));
+  if (/属七和弦[^。；，,]{0,16}(?:解决|进入)[^。；，,]{0,12}(?:主和弦|主音)/.test(normalized)) {
+    add(['V7', 'I'], [romanTokenToChord('V7', context), romanTokenToChord('I', context)], '属到主｜正文语义进行');
   }
-  for (const match of normalized.matchAll(/[“"（(]([1-7]{3,8})[”"）)]/g)) {
-    const progression = digitsToProgression(match[1]);
-    add(progression.display, progression.chords, `${match[1]}｜正文级数进行`);
+  if (/下属和弦[^。；，,]{0,16}(?:进入|到|接)[^。；，,]{0,8}属和弦/.test(normalized) && /主和弦|主音/.test(normalized)) {
+    add(['IV', 'V', 'I'], ['IV', 'V7', 'I'].map((token) => romanTokenToChord(token, context)), '下属—属—主｜正文语义进行');
   }
   if (normalized.includes('I—V—vi—iii—IV—I—ii或IV—V')) {
     add(['I', 'V', 'vi', 'iii', 'IV', 'I', 'ii', 'V'], ['C', 'G', 'Am', 'Em', 'F', 'C', 'Dm', 'G'], '卡农进行｜ii 版本');
     add(['I', 'V', 'vi', 'iii', 'IV', 'I', 'IV', 'V'], ['C', 'G', 'Am', 'Em', 'F', 'C', 'F', 'G'], '卡农进行｜IV 版本');
   }
-  return found.slice(0, 12);
+  return found.slice(0, 16);
 }
 
 function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础篇' | '高级篇'): BookBlock[] {
@@ -199,6 +289,7 @@ function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础�
   let pendingScorePatience = 0;
   let pendingScoreHasImage = false;
   let generatedIndex = 0;
+  let inheritedHarmonyContext: HarmonyContext = { tonic: 'C', mode: 'major' };
 
   const addBlock = (node: Element, kindOverride?: BookBlock['kind']) => {
     const text = node.textContent?.replace(/\s+/g, ' ').trim() ?? '';
@@ -226,7 +317,12 @@ function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础�
     const kind: BookBlock['kind'] = kindOverride ?? (className.includes('headline-level-1') ? 'chapter'
       : className.includes('headline-level-2') ? 'section' : node.querySelector('img') ? 'image' : 'text');
     const id = `${volumeKey}-block-${generatedIndex++}`;
-    const audio = isScoreCaption ? [] : detectTextProgressions(text, id);
+    const emphasis = [...node.querySelectorAll('i, em, strong, b')]
+      .map((element) => element.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+      .filter(Boolean);
+    const audio = isScoreCaption ? [] : detectTextProgressions(text, id, emphasis, inheritedHarmonyContext);
+    const explicitContext = text.match(/([A-Ga-g](?:#|b|♯|♭)?)\s*(大调|小调|major|minor|maj|moll)/);
+    if (explicitContext) inheritedHarmonyContext = detectHarmonyContext(explicitContext[0], inheritedHarmonyContext);
     const imageSeq = node.querySelector('img')?.getAttribute('data-seq') ?? undefined;
     const score = kind === 'image'
       ? (imageSeq ? scoresByImage.get(imageSeq) : undefined)
