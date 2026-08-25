@@ -101,9 +101,13 @@ export class PianoEngine {
   stop() {
     this.generation += 1;
     this.clearTimers();
-    this.scheduledStops.forEach((stopNote) => stopNote());
+    // smplr's default stop applies the piano's 0.5 s release envelope. Passing
+    // a time before every voice's start time takes its immediate-stop branch,
+    // which is what the reader's Stop button promises.
+    this.scheduledStops.forEach((stopNote) => stopNote(0));
     this.scheduledStops.clear();
-    this.piano?.stop();
+    this.piano?.scheduler.stop();
+    this.piano?.stop({ time: 0 });
   }
 
   private startNote(note: number, velocity: number, time: number, duration: number) {
