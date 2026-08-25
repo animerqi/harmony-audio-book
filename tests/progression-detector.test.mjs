@@ -19,6 +19,8 @@ const absoluteCases = [
   ['F♯m6—B7—Emaj9', ['F#m6', 'B7', 'Emaj9']],
   ['Csus4—Cadd9—C/G', ['Csus4', 'Cadd9', 'C/G']],
   ['Bø7—E7—Am9', ['Bø7', 'E7', 'Am9']],
+  ['Bm7♭5—C', ['Bm7b5', 'C']],
+  ['B°7—C', ['B°7', 'C']],
   ['Eb—G(7)—C', ['Eb', 'G(7)', 'C']],
 ];
 
@@ -32,6 +34,13 @@ test('recognizes separate progressions in one DOM block', () => {
   assert.deepEqual(extractAbsoluteProgressions('C—F—C vs. C—Fm—C'), [
     ['C', 'F', 'C'],
     ['C', 'Fm', 'C'],
+  ]);
+});
+
+test('keeps half-diminished and fully diminished symbols as separate progressions', () => {
+  assert.deepEqual(extractAbsoluteProgressions('Bø—C vs. B°7—C'), [
+    ['Bø', 'C'],
+    ['B°7', 'C'],
   ]);
 });
 

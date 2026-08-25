@@ -11,7 +11,7 @@
     "build:pages": "next build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test:progressions": "node --experimental-strip-types --test tests/progression-detector.test.mjs",
+    "test:progressions": "node --experimental-strip-types --test tests/progression-detector.test.mjs tests/chord-parser.test.mjs",
     "audit:progressions": "node --experimental-strip-types scripts/audit-progressions.mjs"
   },
   "dependencies": {

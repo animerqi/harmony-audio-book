@@ -7,6 +7,11 @@ import {
   extractRomanProgressions,
   normalizeProgressionSymbols,
 } from '../lib/harmony/progression-detector';
+import {
+  describeChord,
+  NOTE_INDEX,
+} from '../lib/harmony/chord-parser';
+import { progressionToMidi } from '../lib/harmony/voice-leading';
 
 type AudioExample = {
   id: string;
@@ -91,38 +96,8 @@ function chapterMarker(title: string) {
   return '•';
 }
 
-const NOTE_INDEX: Record<string, number> = {
-  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
-  'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
-};
-
 function normalizeSymbols(value: string) {
   return normalizeProgressionSymbols(value);
-}
-
-function chordToMidi(symbol: string): number[] {
-  const clean = normalizeSymbols(symbol).replace(/[()]/g, '').replace('Δ', 'maj7');
-  const [body, slashBass] = clean.split('/');
-  const match = body.match(/^([A-G](?:#|b)?)(.*)$/);
-  if (!match) return [48, 52, 55];
-  const rootName = match[1];
-  const quality = match[2];
-  const root = 48 + (NOTE_INDEX[rootName] ?? 0);
-  let intervals = [0, 4, 7];
-  if (/dim7/.test(quality)) intervals = [0, 3, 6, 9];
-  else if (/m7b5|ø/.test(quality)) intervals = [0, 3, 6, 10];
-  else if (/dim|°/.test(quality)) intervals = [0, 3, 6];
-  else if (/^m(?!aj)/.test(quality)) intervals = [0, 3, 7];
-  else if (/\+|aug/.test(quality)) intervals = [0, 4, 8];
-  if (intervals.length === 3 && /maj7/.test(quality)) intervals.push(11);
-  else if (intervals.length === 3 && /7/.test(quality)) intervals.push(10);
-  const notes = intervals.map((interval) => root + interval);
-  if (slashBass && NOTE_INDEX[slashBass] !== undefined) {
-    let bass = 36 + NOTE_INDEX[slashBass];
-    while (bass >= notes[0]) bass -= 12;
-    notes.unshift(bass);
-  }
-  return notes;
 }
 
 type HarmonyContext = { tonic: string; mode: 'major' | 'minor' };
@@ -585,8 +560,23 @@ export default function Home() {
     setAudioStatus('loading');
     setPlayback({ id: example.id, step: 0 });
     try {
+      const notes = progressionToMidi(example.chords);
+      if (process.env.NODE_ENV === 'development') {
+        console.groupCollapsed(`[Harmony Audio] ${example.display.join('—')}`);
+        example.chords.forEach((symbol, index) => {
+          const description = describeChord(symbol);
+          console.log(
+            `${example.display[index] ?? symbol}${index < example.chords.length - 1 ? ' →' : ''}`,
+            `Canonical: ${description?.canonical ?? symbol}`,
+            `Notes: ${description?.notes.join(' ') ?? ''}`,
+            'MIDI:',
+            notes[index],
+          );
+        });
+        console.groupEnd();
+      }
       await pianoEngine.playProgression(
-        example.chords.map(chordToMidi),
+        notes,
         tempo,
         loop,
         {
