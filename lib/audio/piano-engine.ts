@@ -16,6 +16,7 @@ type PianoCallbacks = {
 };
 
 type PianoInstance = ReturnType<typeof SplendidGrandPiano>;
+type ScheduledStop = ReturnType<PianoInstance['start']>;
 
 const DEFAULT_VELOCITY = 82;
 
@@ -34,6 +35,7 @@ export class PianoEngine {
   private piano: PianoInstance | null = null;
   private loading: Promise<void> | null = null;
   private timers = new Set<number>();
+  private scheduledStops = new Set<ScheduledStop>();
   private generation = 0;
   private status: PianoEngineStatus = 'idle';
 
@@ -99,7 +101,16 @@ export class PianoEngine {
   stop() {
     this.generation += 1;
     this.clearTimers();
+    this.scheduledStops.forEach((stopNote) => stopNote());
+    this.scheduledStops.clear();
     this.piano?.stop();
+  }
+
+  private startNote(note: number, velocity: number, time: number, duration: number) {
+    if (!this.piano) return;
+    const stopNote = this.piano.start({ note, velocity, time, duration });
+    this.scheduledStops.add(stopNote);
+    this.timer(() => this.scheduledStops.delete(stopNote), (time - (this.context?.currentTime ?? time) + duration + 0.2) * 1000);
   }
 
   async playProgression(
@@ -126,12 +137,7 @@ export class PianoEngine {
       chords.forEach((notes, index) => {
         const start = cycleStart + index * chordDuration;
         notes.forEach((note) => {
-          this.piano?.start({
-            note,
-            velocity: DEFAULT_VELOCITY,
-            time: start,
-            duration: Math.max(0.08, chordDuration * 0.94),
-          });
+          this.startNote(note, DEFAULT_VELOCITY, start, Math.max(0.08, chordDuration * 0.94));
         });
         this.timer(() => {
           if (run === this.generation) callbacks.onStep?.(index);
@@ -162,12 +168,7 @@ export class PianoEngine {
     events.forEach((event, index) => {
       const start = startAt + event.at * secondsPerBeat;
       event.notes.forEach((note) => {
-        this.piano?.start({
-          note,
-          velocity: clampVelocity(event.velocity),
-          time: start,
-          duration: Math.max(0.08, event.duration * secondsPerBeat),
-        });
+        this.startNote(note, clampVelocity(event.velocity), start, Math.max(0.08, event.duration * secondsPerBeat));
       });
       this.timer(() => {
         if (run === this.generation) callbacks.onStep?.(index);
