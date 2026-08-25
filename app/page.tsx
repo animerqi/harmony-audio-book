@@ -44,6 +44,18 @@ type SectionPage = {
 };
 
 type PlaybackState = { id: string; step: number } | null;
+
+const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+
+function publicAsset(path: string): string {
+  if (!path.startsWith('/')) return path;
+  return `${PUBLIC_BASE}${path}`;
+}
+
+function prefixBookAssets(source: string): string {
+  if (!PUBLIC_BASE) return source;
+  return source.replace(/\b(src|href)="\//g, `$1="${PUBLIC_BASE}/`);
+}
 type ReaderFont = 'serif' | 'sans' | 'system';
 
 const READER_FONT_STACKS: Record<ReaderFont, string> = {
@@ -177,7 +189,7 @@ function detectTextProgressions(text: string, blockId: string): AudioExample[] {
 }
 
 function parseBook(source: string, scoreResults: ScoreResult[], volume: '基础篇' | '高级篇'): BookBlock[] {
-  const documentNode = new DOMParser().parseFromString(source, 'text/html');
+  const documentNode = new DOMParser().parseFromString(prefixBookAssets(source), 'text/html');
   const allNodes = [...documentNode.body.children];
   const blocks: BookBlock[] = [];
   const volumeKey = volume === '基础篇' ? 'basic' : 'advanced';
@@ -398,7 +410,7 @@ function ScoreAudioCard({ score, playback, onPlay, onStop }: {
       </div>
       <div className="score-meta-row">
         <label>速度<input type="range" min="56" max="132" value={tempo} onChange={(event) => setTempo(Number(event.target.value))} /><output>{tempo} BPM</output></label>
-        <span className="score-downloads"><a href={score.midiUrl} download>下载 MIDI</a><a href={score.musicXmlUrl} download>MusicXML</a></span>
+        <span className="score-downloads"><a href={publicAsset(score.midiUrl)} download>下载 MIDI</a><a href={publicAsset(score.musicXmlUrl)} download>MusicXML</a></span>
       </div>
       <p className="score-disclaimer">由 HOMR 从谱例图片自动识别，未用正文和弦替代；正式版仍需逐条听校。</p>
     </section>
@@ -469,15 +481,15 @@ export default function Home() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/books/basic.html').then((response) => {
+      fetch(publicAsset('/books/basic.html')).then((response) => {
         if (!response.ok) throw new Error('无法读取基础篇');
         return response.text();
       }),
-      fetch('/books/advanced.html').then((response) => {
+      fetch(publicAsset('/books/advanced.html')).then((response) => {
         if (!response.ok) throw new Error('无法读取高级篇');
         return response.text();
       }),
-      fetch('/score-audio/manifest.json').then((response) => {
+      fetch(publicAsset('/score-audio/manifest.json')).then((response) => {
         if (!response.ok) throw new Error('无法读取谱例音频');
         return response.json() as Promise<{ scores: ScoreResult[] }>;
       }),

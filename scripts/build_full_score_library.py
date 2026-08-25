@@ -34,6 +34,7 @@ PUBLIC_IMAGES = PROJECT / "public" / "book-images" / "scores"
 PUBLIC_AUDIO = PROJECT / "public" / "score-audio"
 HOMR_REPO = PROJECT.parent / "homr_gui"
 PREBUILT_SEQS = {"2.1": "938012151", "2.2": "938012698", "2.3": "938012775"}
+MIN_UNNUMBERED_EVENTS = 5
 
 SOURCES = {
     "basic": Path(r"E:\Downloads\图解和声(基础篇).html"),
@@ -130,18 +131,20 @@ def discover_scores() -> list[dict[str, str]]:
                 if patience <= 0 or "headline-level" in line or line.lstrip().startswith("<h1"):
                     pending_id = None
 
-        # Chapter 13 frequently presents several score excerpts under one prose
-        # introduction without repeating a numbered "谱例" caption.  Register
-        # every still-unseen image in that chapter and let HOMR's staff detector
-        # decide whether it is actually playable notation.  The section-local
-        # image number is descriptive only; it does not invent a book score ID.
+        # The advanced volume frequently presents several score excerpts under
+        # one prose introduction without repeating a numbered "谱例" caption.
+        # Register every still-unseen image in each advanced section and let
+        # HOMR's staff detector decide whether it is actually playable notation.
+        # The section-local image number is descriptive only; it does not invent
+        # a book score ID.  This also catches continuation images belonging to a
+        # numbered example, such as the later pages of 谱例 11.64.
         if volume == "advanced":
             current_section = ""
             section_image_index: dict[str, int] = {}
             for line in source.splitlines():
                 if re.search(r"<h1\b", line, re.IGNORECASE):
                     heading_match = re.match(r"^(\d+-\d+)\b", plain_text(line))
-                    current_section = heading_match.group(1) if heading_match and heading_match.group(1).startswith("13-") else ""
+                    current_section = heading_match.group(1) if heading_match else ""
                 if not current_section:
                     continue
                 for image_match in IMAGE_TAG.finditer(line):
@@ -292,6 +295,13 @@ def export_manifest(specs: list[dict[str, str]]) -> tuple[int, list[dict[str, st
             events, bpm, parsed = score_events(xml_path)
             if not events:
                 raise ValueError("MusicXML contains no notes")
+            # A few theory diagrams contain a tiny decorative staff (for
+            # example a circle-of-fifths chart).  HOMR can technically extract
+            # one or two notes from them, but that is not a useful score
+            # example.  Keep short numbered examples intact while filtering
+            # only the automatically discovered, unnumbered image candidates.
+            if " 图" in spec["scoreId"] and len(events) < MIN_UNNUMBERED_EVENTS:
+                continue
             shutil.copy2(xml_path, public_xml)
             if not public_midi.exists():
                 parsed.write("midi", fp=str(public_midi))
@@ -351,15 +361,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--process", action="store_true")
+    parser.add_argument("--export", action="store_true")
     parser.add_argument("--download-workers", type=int, default=12)
     parser.add_argument("--workers", type=int, default=2)
     args = parser.parse_args()
-    if not args.prepare and not args.process:
-        parser.error("Choose --prepare and/or --process")
+    if not args.prepare and not args.process and not args.export:
+        parser.error("Choose --prepare, --process, and/or --export")
     if args.prepare:
         prepare(args.download_workers)
     if args.process:
         process(args.workers)
+    elif args.export:
+        if not INDEX.exists():
+            raise SystemExit("Run with --prepare first")
+        specs: list[dict[str, str]] = json.loads(INDEX.read_text(encoding="utf-8"))
+        exported, export_failures = export_manifest(specs)
+        print(f"complete: exported={exported}, export_failures={len(export_failures)}", flush=True)
 
 
 if __name__ == "__main__":
